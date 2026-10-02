@@ -1,5 +1,5 @@
 import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
-import { DocStatus, DocType, Prisma, ShiftVisibility } from '@prisma/client';
+import { DocStatus, DocType, Prisma, ShiftVisibility, StaffBankTier } from '@prisma/client';
 
 export const MANDATORY_DOCS: DocType[] = [
   DocType.IDENTITY,
@@ -25,11 +25,12 @@ const lower = (xs: string[]) => new Set(xs.map((x) => x.trim().toLowerCase()));
 export function eligibilityProblems(
   shift: ShiftLike,
   worker: WorkerLike,
-  opts: { skipSkills?: boolean } = {},
+  opts: { skipSkills?: boolean; extraDocs?: DocType[] } = {},
 ): string[] {
   const problems: string[] = [];
 
-  for (const type of MANDATORY_DOCS) {
+  // Platform-wide mandatory credentials plus anything the shift's organization insists on.
+  for (const type of new Set([...MANDATORY_DOCS, ...(opts.extraDocs ?? [])])) {
     const ok = worker.documents.some(
       (d) =>
         d.type === type &&
@@ -52,17 +53,27 @@ export function eligibilityProblems(
   return problems;
 }
 
-/** STAFF_BANK_ONLY shifts are only visible to active staff-bank members of the branch's organization. */
+export const TIER_RANK: Record<StaffBankTier, number> = {
+  TIER_1_PREFERRED: 1,
+  TIER_2_REGULAR: 2,
+  TIER_3_RESERVE: 3,
+};
+
+/**
+ * STAFF_BANK_ONLY shifts are only visible to active staff-bank members of the branch's organization,
+ * and only once the tiered cascade has reached the member's tier (Tier 1 first, Tier 3 last).
+ */
 export function isVisibleToWorker(
-  shift: { visibility: ShiftVisibility; branchId: string; branch: { organizationId: string } },
-  memberships: { organizationId: string; branchId: string | null; isActive: boolean }[],
+  shift: { visibility: ShiftVisibility; branchId: string; cascadeStage: number; branch: { organizationId: string } },
+  memberships: { organizationId: string; branchId: string | null; isActive: boolean; tier: StaffBankTier }[],
 ): boolean {
   if (shift.visibility !== ShiftVisibility.STAFF_BANK_ONLY) return true;
   return memberships.some(
     (m) =>
       m.isActive &&
       m.organizationId === shift.branch.organizationId &&
-      (m.branchId === null || m.branchId === shift.branchId),
+      (m.branchId === null || m.branchId === shift.branchId) &&
+      TIER_RANK[m.tier] <= shift.cascadeStage,
   );
 }
 
@@ -78,7 +89,7 @@ export async function assertWorkerCanBook(
 ) {
   const shift = await client.shift.findUnique({
     where: { id: shiftId },
-    include: { branch: true },
+    include: { branch: { include: { organization: { select: { requiredDocTypes: true } } } } },
   });
   if (!shift) throw new NotFoundException('Shift not found');
 
@@ -93,7 +104,10 @@ export async function assertWorkerCanBook(
     throw new NotFoundException('Shift not found');
   }
 
-  const problems = eligibilityProblems(shift, worker, { skipSkills: opts.skipSkills });
+  const problems = eligibilityProblems(shift, worker, {
+    skipSkills: opts.skipSkills,
+    extraDocs: shift.branch.organization?.requiredDocTypes ?? [],
+  });
   if (problems.length) {
     throw new ForbiddenException({
       message: 'Worker is not eligible for this shift',

@@ -4,7 +4,9 @@ import { DocStatus, DocType, Prisma, Role, ShiftVisibility } from '@prisma/clien
 import * as bcrypt from 'bcryptjs';
 import { AccessService, AuthUser } from '../common/access.service';
 import { StorageService } from '../storage/storage.service';
-import { MANDATORY_DOCS, isVisibleToWorker } from '../shifts/eligibility';
+import { isVisibleToWorker } from '../shifts/eligibility';
+import { recomputeVerified } from './verification';
+import { NotificationsService } from '../notifications/notifications.service';
 import { generateTempPassword } from '../users/users.service';
 import {
   ConciergeWorkerDto, DocumentQueueQueryDto, UpdatePreferencesDto, UploadDocumentDto, VerifyDocumentDto, WorkerQueryDto,
@@ -29,6 +31,7 @@ export class ReliefWorkersService {
     private prisma: PrismaService,
     private access: AccessService,
     private storage: StorageService,
+    private notifications: NotificationsService,
   ) {}
 
   async findAll(user: AuthUser, query: WorkerQueryDto) {
@@ -202,21 +205,17 @@ export class ReliefWorkersService {
         },
         include: { reliefWorker: true },
       });
-      await this.recomputeVerified(tx, doc.reliefWorkerId);
+      await recomputeVerified(tx, doc.reliefWorkerId);
+      return doc;
+    }).then(async (doc) => {
+      await this.notifications.notifyWorker(doc.reliefWorkerId, {
+        type: dto.status === 'VERIFIED' ? 'DOCUMENT_VERIFIED' : 'DOCUMENT_REJECTED',
+        title: dto.status === 'VERIFIED' ? 'Document verified' : 'Document rejected',
+        body: dto.status === 'REJECTED' ? `${doc.type}: ${dto.notes}` : doc.type,
+        link: '/profile',
+      });
       return doc;
     });
-  }
-
-  /** A worker is "verified" when every mandatory document type is VERIFIED and unexpired. */
-  async recomputeVerified(tx: Prisma.TransactionClient, workerId: string) {
-    const docs = await tx.complianceDocument.findMany({
-      where: { reliefWorkerId: workerId, status: DocStatus.VERIFIED },
-    });
-    const now = Date.now();
-    const valid = new Set(docs.filter((d) => !d.expiresAt || d.expiresAt.getTime() > now).map((d) => d.type));
-    const isVerified = MANDATORY_DOCS.every((t) => valid.has(t));
-    await tx.reliefProfile.update({ where: { id: workerId }, data: { isVerified } });
-    return isVerified;
   }
 
   updatePreferences(workerId: string, data: UpdatePreferencesDto) {

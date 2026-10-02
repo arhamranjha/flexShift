@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { APP_FILTER, APP_GUARD } from '@nestjs/core';
 import { ConfigModule } from '@nestjs/config';
+import { ScheduleModule } from '@nestjs/schedule';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { PrismaModule } from './prisma/prisma.module';
 import { CommonModule } from './common/common.module';
@@ -19,6 +20,8 @@ import { TimesheetsModule } from './timesheets/timesheets.module';
 import { InvoicesModule } from './invoices/invoices.module';
 import { LeaveModule } from './leave/leave.module';
 import { AnalyticsModule } from './analytics/analytics.module';
+import { NotificationsModule } from './notifications/notifications.module';
+import { JobsModule } from './jobs/jobs.module';
 
 @Module({
   imports: [
@@ -27,6 +30,9 @@ import { AnalyticsModule } from './analytics/analytics.module';
     PrismaModule,
     CommonModule,
     StorageModule,
+    NotificationsModule,
+    ScheduleModule.forRoot(),
+    JobsModule,
     AuthModule,
     UsersModule,
     OrganizationsModule,

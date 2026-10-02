@@ -6,9 +6,14 @@
     "dev:backend": "pnpm --filter backend-api start:dev",
     "build:backend": "pnpm --filter backend-api build",
     "prisma:generate": "pnpm --filter backend-api prisma:generate",
-    "prisma:migrate": "pnpm --filter backend-api prisma:migrate"
+    "prisma:migrate": "pnpm --filter backend-api prisma:migrate",
+    "dev:web": "pnpm --filter web-admin dev",
+    "dev:portal": "pnpm --filter worker-portal dev",
+    "test:backend": "pnpm --filter backend-api test",
+    "lint": "pnpm -r lint"
   },
   "devDependencies": {
     "typescript": "^5.4.5"
-  }
+  },
+  "packageManager": "pnpm@11.25.0"
 }

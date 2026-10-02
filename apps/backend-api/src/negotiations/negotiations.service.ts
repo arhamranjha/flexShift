@@ -1,8 +1,9 @@
-import { Injectable, BadRequestException, NotFoundException, ConflictException, ForbiddenException } from '@nestjs/common';
+import { Injectable, BadRequestException, NotFoundException, ConflictException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { ApplicationStatus, NegotiationStatus, Prisma, Role, ShiftStatus } from '@prisma/client';
 import { AccessService, AuthUser } from '../common/access.service';
 import { assertShiftBookable, assertWorkerCanBook, lockWorker } from '../shifts/eligibility';
+import { NotificationsService } from '../notifications/notifications.service';
 import { CreateNegotiationDto, NegotiationQueryDto } from './dto/negotiation.dto';
 
 const ACTIVE = [NegotiationStatus.PENDING, NegotiationStatus.COUNTERED];
@@ -13,13 +14,17 @@ export class NegotiationsService {
   constructor(
     private prisma: PrismaService,
     private access: AccessService,
+    private notifications: NotificationsService,
   ) {}
 
   async createNegotiation(workerId: string, dto: CreateNegotiationDto) {
-    return this.prisma.$transaction(async (tx) => {
+    let shiftInfo: { title: string; branchId: string };
+
+    const negotiation = await this.prisma.$transaction(async (tx) => {
       const { shift } = await assertWorkerCanBook(tx, dto.shiftId, workerId);
       assertShiftBookable(shift.status);
       if (shift.startTime.getTime() < Date.now()) throw new BadRequestException('Shift has already started');
+      shiftInfo = { title: shift.title, branchId: shift.branchId };
 
       const start = dto.proposedStartTime ? new Date(dto.proposedStartTime) : null;
       const end = dto.proposedEndTime ? new Date(dto.proposedEndTime) : null;
@@ -32,7 +37,7 @@ export class NegotiationsService {
       });
       if (active) throw new BadRequestException('You already have an open negotiation on this shift');
 
-      const negotiation = await tx.shiftNegotiation.create({
+      const created = await tx.shiftNegotiation.create({
         data: {
           shiftId: dto.shiftId,
           reliefWorkerId: workerId,
@@ -47,8 +52,16 @@ export class NegotiationsService {
         where: { id: dto.shiftId, status: ShiftStatus.OPEN },
         data: { status: ShiftStatus.IN_NEGOTIATION },
       });
-      return negotiation;
+      return created;
     });
+
+    await this.notifications.notifyBranchStaff(shiftInfo.branchId, {
+      type: 'NEGOTIATION_PROPOSED',
+      title: 'New rate proposal',
+      body: `£${Number(dto.proposedHourlyRate).toFixed(2)}/h proposed on ${shiftInfo.title}`,
+      link: '/negotiations',
+    });
+    return negotiation;
   }
 
   listForStaff(user: AuthUser, q: NegotiationQueryDto) {
@@ -88,9 +101,26 @@ export class NegotiationsService {
     return neg;
   }
 
+  /** Tells the other side of the negotiation that something happened. */
+  private async notifyCounterparty(
+    user: AuthUser,
+    neg: { reliefWorkerId: string; shift: { id: string; title: string; branchId: string } },
+    type: string,
+    title: string,
+  ) {
+    if (user.role === Role.RELIEF_WORKER) {
+      await this.notifications.notifyBranchStaff(neg.shift.branchId, { type, title, body: neg.shift.title, link: '/negotiations' });
+    } else {
+      await this.notifications.notifyWorker(neg.reliefWorkerId, { type, title, body: neg.shift.title, link: `/shifts/${neg.shift.id}` });
+    }
+  }
+
   async acceptNegotiation(id: string, user: AuthUser) {
-    return this.prisma.$transaction(async (tx) => {
+    let actedOn: { reliefWorkerId: string; shift: { id: string; title: string; branchId: string } };
+
+    const booked = await this.prisma.$transaction(async (tx) => {
       const neg = await this.loadActionable(tx, id, user);
+      actedOn = { reliefWorkerId: neg.reliefWorkerId, shift: neg.shift };
 
       if (user.role === Role.RELIEF_WORKER) {
         if (neg.status !== NegotiationStatus.COUNTERED) {
@@ -100,6 +130,7 @@ export class NegotiationsService {
         throw new BadRequestException('Managers can only accept pending worker proposals');
       }
 
+      // Lock the worker so a concurrent booking cannot slip past the overlap check below.
       await lockWorker(tx, neg.reliefWorkerId);
       const { shift } = await assertWorkerCanBook(tx, neg.shiftId, neg.reliefWorkerId, { asManager: true });
       assertShiftBookable(shift.status);
@@ -145,11 +176,17 @@ export class NegotiationsService {
 
       return tx.shift.findUnique({ where: { id: neg.shiftId }, include: { assignedWorker: true, branch: true } });
     });
+
+    await this.notifyCounterparty(user, actedOn, 'NEGOTIATION_ACCEPTED', 'Rate agreed: shift booked');
+    return booked;
   }
 
   async counterOffer(id: string, rate: number, user: AuthUser) {
-    return this.prisma.$transaction(async (tx) => {
+    let actedOn: { reliefWorkerId: string; shift: { id: string; title: string; branchId: string } };
+
+    const updated = await this.prisma.$transaction(async (tx) => {
       const neg = await this.loadActionable(tx, id, user);
+      actedOn = { reliefWorkerId: neg.reliefWorkerId, shift: neg.shift };
       if (neg.status !== NegotiationStatus.PENDING) {
         throw new BadRequestException('Only pending proposals can be countered');
       }
@@ -160,12 +197,18 @@ export class NegotiationsService {
       if (res.count === 0) throw new ConflictException('Negotiation changed while updating, please retry');
       return tx.shiftNegotiation.findUniqueOrThrow({ where: { id } });
     });
+
+    await this.notifyCounterparty(user, actedOn, 'NEGOTIATION_COUNTERED', `Counter-offer: £${rate.toFixed(2)}/h`);
+    return updated;
   }
 
   async rejectNegotiation(id: string, user: AuthUser) {
-    return this.prisma.$transaction(async (tx) => {
+    let actedOn: { reliefWorkerId: string; shift: { id: string; title: string; branchId: string } };
+
+    const updated = await this.prisma.$transaction(async (tx) => {
       const neg = await this.loadActionable(tx, id, user);
-      if (!ACTIVE.includes(neg.status as any)) {
+      actedOn = { reliefWorkerId: neg.reliefWorkerId, shift: neg.shift };
+      if (!ACTIVE.includes(neg.status as (typeof ACTIVE)[number])) {
         throw new BadRequestException('Only open negotiations can be rejected');
       }
       const res = await tx.shiftNegotiation.updateMany({
@@ -173,7 +216,7 @@ export class NegotiationsService {
         data: { status: NegotiationStatus.REJECTED },
       });
       if (res.count === 0) throw new ConflictException('Negotiation changed while updating, please retry');
-      const updated = await tx.shiftNegotiation.findUniqueOrThrow({ where: { id } });
+      const rejected = await tx.shiftNegotiation.findUniqueOrThrow({ where: { id } });
 
       const remaining = await tx.shiftNegotiation.count({ where: { shiftId: neg.shiftId, status: { in: ACTIVE } } });
       if (remaining === 0) {
@@ -183,7 +226,10 @@ export class NegotiationsService {
           data: { status: ShiftStatus.OPEN },
         });
       }
-      return updated;
+      return rejected;
     });
+
+    await this.notifyCounterparty(user, actedOn, 'NEGOTIATION_REJECTED', 'Rate proposal declined');
+    return updated;
   }
 }

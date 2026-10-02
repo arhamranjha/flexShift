@@ -4,6 +4,16 @@ import { LeaveStatus, LeaveType, ShiftStatus, ShiftVisibility } from '@prisma/cl
 import { AccessService, AuthUser } from '../common/access.service';
 import { SubmitLeaveDto } from './dto/leave.dto';
 
+/** The instant at which a Europe/London wall-clock time occurs on the given calendar day (handles BST). */
+function londonTime(day: Date, hour: number, minute: number) {
+  const guess = Date.UTC(day.getUTCFullYear(), day.getUTCMonth(), day.getUTCDate(), hour, minute);
+  const part = new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/London', timeZoneName: 'shortOffset' })
+    .formatToParts(new Date(guess))
+    .find((p) => p.type === 'timeZoneName')?.value; // "GMT" or "GMT+1"
+  const offsetHours = part && part !== 'GMT' ? Number(part.replace('GMT', '')) : 0;
+  return new Date(guess - offsetHours * 3_600_000);
+}
+
 @Injectable()
 export class LeaveService {
   constructor(
@@ -84,8 +94,8 @@ export class LeaveService {
           const last = Date.UTC(end.getUTCFullYear(), end.getUTCMonth(), end.getUTCDate());
           for (; day.getTime() <= last; day.setUTCDate(day.getUTCDate() + 1)) {
             windows.push({
-              start: new Date(day.getTime() + 9 * 3_600_000),
-              end: new Date(day.getTime() + 17.5 * 3_600_000),
+              start: londonTime(day, 9, 0),
+              end: londonTime(day, 17, 30),
             });
           }
         }

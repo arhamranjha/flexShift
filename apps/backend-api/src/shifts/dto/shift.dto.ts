@@ -19,6 +19,8 @@ export class CreateShiftDto {
   @IsOptional() @IsBoolean() isOvernight?: boolean;
   @IsOptional() @IsBoolean() isEmergency?: boolean;
   @IsOptional() @IsString() @MaxLength(1000) notes?: string;
+  /** Staff-bank shifts cascade Tier 1 → 2 → 3 → marketplace on a timer. Pass false to expose the whole bank at once. */
+  @IsOptional() @IsBoolean() cascade?: boolean;
 }
 
 export class UpdateShiftDto extends PartialType(OmitType(CreateShiftDto, ['branchId'] as const)) {}

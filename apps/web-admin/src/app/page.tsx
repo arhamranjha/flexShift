@@ -1,227 +1,100 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { Header } from '@/components/Header';
-import { 
-  Building2, 
-  Users, 
-  AlertTriangle, 
-  Clock, 
-  TrendingUp, 
-  PlusCircle, 
-  CheckCircle2, 
-  ArrowRight 
+import { fmtRange, gbp } from '@flexshift/api-client';
+import { Badge, Card, CardHeader, EmptyState, ErrorBlock, LoadingBlock, StatusBadge, useAsync } from '@flexshift/ui';
+import {
+  AlertOctagon, CalendarCheck, CalendarClock, ChevronRight, Clock, FileCheck2, Handshake, Palmtree, PoundSterling, Target, Users,
 } from 'lucide-react';
 import Link from 'next/link';
+import type { ReactNode } from 'react';
+import { Header } from '@/components/Header';
+import { api, useScope } from '@/lib/auth';
 
-export default function DashboardPage() {
-  const [stats, setStats] = useState({
-    activeBranches: 3,
-    staffBankSize: 24,
-    fillRate: '94.2%',
-    uncoveredVacancies: 2,
-    pendingTimesheets: 1,
-  });
+function Stat({ label, value, icon, tone = 'emerald', href, hint }: {
+  label: string; value: ReactNode; icon: ReactNode; tone?: 'emerald' | 'rose' | 'amber' | 'sky' | 'violet'; href?: string; hint?: string;
+}) {
+  const toneCls = {
+    emerald: 'bg-emerald-50 text-emerald-600', rose: 'bg-rose-50 text-rose-600', amber: 'bg-amber-50 text-amber-600',
+    sky: 'bg-sky-50 text-sky-600', violet: 'bg-violet-50 text-violet-600',
+  }[tone];
+  const body = (
+    <Card className={href ? 'p-5 hover:border-emerald-300 transition-colors h-full' : 'p-5 h-full'}>
+      <div className="flex items-start justify-between">
+        <div>
+          <p className="text-xs font-semibold text-slate-500">{label}</p>
+          <p className="text-2xl font-bold text-slate-900 mt-1">{value}</p>
+          {hint && <p className="text-[11px] text-slate-500 mt-1">{hint}</p>}
+        </div>
+        <span className={`p-2 rounded-lg ${toneCls}`}>{icon}</span>
+      </div>
+    </Card>
+  );
+  return href ? <Link href={href}>{body}</Link> : body;
+}
 
-  const [urgentShifts, setUrgentShifts] = useState([
-    {
-      id: '1',
-      branch: 'Beckenham High Street Pharmacy',
-      role: 'Pharmacist',
-      date: 'Sat, 10 Oct 2026',
-      time: '20:00 - 04:30',
-      rate: '£35.00/hr',
-      isEmergency: true,
-      systems: ['Nexphase'],
-    },
-    {
-      id: '2',
-      branch: 'Richmond George Street Healthcare',
-      role: 'Pharmacist',
-      date: 'Sun, 11 Oct 2026',
-      time: '09:00 - 18:00',
-      rate: '£33.00/hr',
-      isEmergency: false,
-      systems: ['ProScript'],
-    },
-  ]);
+export default function OverviewPage() {
+  const { branchId, branchIds, loading: scopeLoading } = useScope();
+  const { data, loading, error, reload } = useAsync(
+    () => (branchIds.length ? api.analytics.overview(branchId || undefined) : Promise.resolve(undefined)),
+    [branchId, branchIds.join(',')],
+  );
 
   return (
     <>
-      <Header 
-        title="Workforce Operations Dashboard" 
-        subtitle="Live multi-branch scheduling, staff bank engagement, and shift fulfillment metrics"
-      />
-
-      <main className="p-8 space-y-8">
-        {/* KPI Metric Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-5 gap-5">
-          <div className="bg-white p-5 rounded-xl border border-slate-200/80 shadow-sm flex items-center justify-between">
-            <div>
-              <p className="text-xs font-medium text-slate-500 uppercase tracking-wider">Active Branches</p>
-              <h3 className="text-2xl font-bold text-slate-900 mt-1">{stats.activeBranches}</h3>
-              <p className="text-[11px] text-emerald-600 font-medium mt-1">London Network</p>
-            </div>
-            <div className="w-11 h-11 bg-slate-100 rounded-lg flex items-center justify-center text-slate-600">
-              <Building2 className="w-5 h-5" />
-            </div>
-          </div>
-
-          <div className="bg-white p-5 rounded-xl border border-slate-200/80 shadow-sm flex items-center justify-between">
-            <div>
-              <p className="text-xs font-medium text-slate-500 uppercase tracking-wider">Staff Bank Pool</p>
-              <h3 className="text-2xl font-bold text-slate-900 mt-1">{stats.staffBankSize}</h3>
-              <p className="text-[11px] text-emerald-600 font-medium mt-1">100% Vetted Relief</p>
-            </div>
-            <div className="w-11 h-11 bg-emerald-50 rounded-lg flex items-center justify-center text-emerald-600">
-              <Users className="w-5 h-5" />
-            </div>
-          </div>
-
-          <div className="bg-white p-5 rounded-xl border border-slate-200/80 shadow-sm flex items-center justify-between">
-            <div>
-              <p className="text-xs font-medium text-slate-500 uppercase tracking-wider">Shift Fill Rate</p>
-              <h3 className="text-2xl font-bold text-slate-900 mt-1">{stats.fillRate}</h3>
-              <p className="text-[11px] text-emerald-600 font-medium mt-1">+3.8% this month</p>
-            </div>
-            <div className="w-11 h-11 bg-blue-50 rounded-lg flex items-center justify-center text-blue-600">
-              <TrendingUp className="w-5 h-5" />
-            </div>
-          </div>
-
-          <div className="bg-white p-5 rounded-xl border border-slate-200/80 shadow-sm flex items-center justify-between">
-            <div>
-              <p className="text-xs font-medium text-slate-500 uppercase tracking-wider">Open Vacancies</p>
-              <h3 className="text-2xl font-bold text-rose-600 mt-1">{stats.uncoveredVacancies}</h3>
-              <p className="text-[11px] text-rose-500 font-medium mt-1">Requires immediate cover</p>
-            </div>
-            <div className="w-11 h-11 bg-rose-50 rounded-lg flex items-center justify-center text-rose-600">
-              <AlertTriangle className="w-5 h-5" />
-            </div>
-          </div>
-
-          <div className="bg-white p-5 rounded-xl border border-slate-200/80 shadow-sm flex items-center justify-between">
-            <div>
-              <p className="text-xs font-medium text-slate-500 uppercase tracking-wider">Timesheet Queue</p>
-              <h3 className="text-2xl font-bold text-amber-600 mt-1">{stats.pendingTimesheets}</h3>
-              <p className="text-[11px] text-amber-600 font-medium mt-1">Awaiting manager sign-off</p>
-            </div>
-            <div className="w-11 h-11 bg-amber-50 rounded-lg flex items-center justify-center text-amber-600">
-              <Clock className="w-5 h-5" />
-            </div>
-          </div>
-        </div>
-
-        {/* Quick Actions & Urgent Shifts */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-          {/* Urgent Vacancies Card */}
-          <div className="lg:col-span-2 bg-white rounded-xl border border-slate-200/80 shadow-sm overflow-hidden">
-            <div className="p-6 border-b border-slate-100 flex items-center justify-between">
-              <div>
-                <h2 className="text-base font-bold text-slate-900">Priority Open Vacancies</h2>
-                <p className="text-xs text-slate-500">Uncovered shifts needing relief staff assignment</p>
-              </div>
-              <Link 
-                href="/rota" 
-                className="text-xs font-semibold text-emerald-600 hover:text-emerald-700 flex items-center gap-1"
-              >
-                View Full Rota <ArrowRight className="w-3.5 h-3.5" />
-              </Link>
+      <Header title="Executive Overview" subtitle="Workforce coverage, spend and items needing attention" />
+      <main className="p-8 space-y-6">
+        {scopeLoading || branchIds.length === 0 || (loading && !data) ? (
+          scopeLoading || loading ? <LoadingBlock /> : <EmptyState title="No branches available" hint="Your account is not linked to any branch yet." />
+        ) : error ? (
+          <ErrorBlock error={error} retry={reload} />
+        ) : data && (
+          <>
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+              <Stat label="Open vacancies" value={data.openShifts} icon={<CalendarClock className="w-5 h-5" />} tone="amber" href="/shifts" />
+              <Stat label="Emergency vacancies" value={data.emergencyOpen} icon={<AlertOctagon className="w-5 h-5" />} tone="rose" href="/rota" />
+              <Stat label="Upcoming booked" value={data.upcomingBooked} icon={<CalendarCheck className="w-5 h-5" />} href="/rota" />
+              <Stat
+                label="30-day fill rate"
+                value={data.fillRate === null ? 'n/a' : `${data.fillRate}%`}
+                icon={<Target className="w-5 h-5" />}
+                tone="sky"
+                hint={data.fillRate === null ? 'No shifts in the last 30 days' : undefined}
+              />
+              <Stat label="Staff bank headcount" value={data.staffBankHeadcount} icon={<Users className="w-5 h-5" />} tone="violet" href="/staff-bank" />
+              <Stat label="Spend this month" value={gbp(data.monthSpend)} icon={<PoundSterling className="w-5 h-5" />} />
+              <Stat label="Pending timesheets" value={data.pendingTimesheets} icon={<Clock className="w-5 h-5" />} tone="amber" href="/timesheets" />
+              <Stat label="Pending leave" value={data.pendingLeave} icon={<Palmtree className="w-5 h-5" />} tone="amber" href="/leave" />
+              <Stat label="Pending negotiations" value={data.pendingNegotiations} icon={<Handshake className="w-5 h-5" />} tone="violet" href="/negotiations" />
+              <Stat label="Documents to verify" value={data.pendingDocuments} icon={<FileCheck2 className="w-5 h-5" />} tone="sky" href="/compliance" />
             </div>
 
-            <div className="divide-y divide-slate-100">
-              {urgentShifts.map((shift) => (
-                <div key={shift.id} className="p-5 flex items-center justify-between hover:bg-slate-50/60 transition-colors">
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-2">
-                      <span className="font-semibold text-sm text-slate-900">{shift.branch}</span>
-                      {shift.isEmergency && (
-                        <span className="bg-rose-100 text-rose-800 text-[10px] font-bold px-2 py-0.5 rounded-full uppercase">
-                          Emergency Surge
-                        </span>
-                      )}
-                    </div>
-                    <div className="text-xs text-slate-500 flex items-center gap-3">
-                      <span>{shift.date}</span>
-                      <span>•</span>
-                      <span>{shift.time}</span>
-                      <span>•</span>
-                      <span className="font-bold text-emerald-700">{shift.rate}</span>
-                    </div>
-                    <div className="flex items-center gap-1.5 mt-1.5">
-                      {shift.systems.map((s) => (
-                        <span key={s} className="bg-slate-100 text-slate-600 text-[11px] px-2 py-0.5 rounded border border-slate-200/60 font-medium">
-                          {s}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div className="flex items-center gap-2">
-                    <Link
-                      href="/rota"
-                      className="px-3.5 py-1.5 bg-emerald-600 text-white rounded-lg text-xs font-semibold hover:bg-emerald-700 shadow-sm"
-                    >
-                      Assign Staff
-                    </Link>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Quick Shortcuts & Staff Bank Tier summary */}
-          <div className="bg-white rounded-xl border border-slate-200/80 shadow-sm p-6 space-y-6">
-            <div>
-              <h2 className="text-base font-bold text-slate-900">Direct Actions</h2>
-              <p className="text-xs text-slate-500 mt-0.5">Quick workflows for rota coordinators</p>
-            </div>
-
-            <div className="space-y-3">
-              <Link
-                href="/rota"
-                className="w-full flex items-center justify-between p-3.5 rounded-lg border border-slate-200 bg-slate-50/50 hover:bg-emerald-50 hover:border-emerald-200 transition-colors group"
-              >
-                <div className="flex items-center gap-3">
-                  <PlusCircle className="w-5 h-5 text-emerald-600" />
-                  <div className="text-left">
-                    <div className="text-xs font-bold text-slate-800 group-hover:text-emerald-900">Build Open Shift</div>
-                    <div className="text-[11px] text-slate-500">Publish slot to Staff Bank or Marketplace</div>
-                  </div>
-                </div>
-                <ArrowRight className="w-4 h-4 text-slate-400 group-hover:text-emerald-600" />
-              </Link>
-
-              <Link
-                href="/staff-bank"
-                className="w-full flex items-center justify-between p-3.5 rounded-lg border border-slate-200 bg-slate-50/50 hover:bg-emerald-50 hover:border-emerald-200 transition-colors group"
-              >
-                <div className="flex items-center gap-3">
-                  <Users className="w-5 h-5 text-blue-600" />
-                  <div className="text-left">
-                    <div className="text-xs font-bold text-slate-800 group-hover:text-blue-900">Staff Bank Roster</div>
-                    <div className="text-[11px] text-slate-500">Tier 1 & Tier 2 preferred relief pool</div>
-                  </div>
-                </div>
-                <ArrowRight className="w-4 h-4 text-slate-400 group-hover:text-blue-600" />
-              </Link>
-
-              <Link
-                href="/compliance"
-                className="w-full flex items-center justify-between p-3.5 rounded-lg border border-slate-200 bg-slate-50/50 hover:bg-emerald-50 hover:border-emerald-200 transition-colors group"
-              >
-                <div className="flex items-center gap-3">
-                  <CheckCircle2 className="w-5 h-5 text-emerald-600" />
-                  <div className="text-left">
-                    <div className="text-xs font-bold text-slate-800 group-hover:text-emerald-900">Verify Credentials</div>
-                    <div className="text-[11px] text-slate-500">Inspect Identity, RTW, DBS & Indemnity</div>
-                  </div>
-                </div>
-                <ArrowRight className="w-4 h-4 text-slate-400 group-hover:text-emerald-600" />
-              </Link>
-            </div>
-          </div>
-        </div>
+            <Card>
+              <CardHeader title="Urgent vacancies (next 72h)" subtitle="Unfilled shifts starting soon" action={<Link href="/rota" className="text-xs font-semibold text-emerald-700 hover:underline">Open rota</Link>} />
+              {data.urgentShifts.length === 0 ? (
+                <EmptyState title="Nothing urgent" hint="All shifts starting in the next 72 hours are covered." />
+              ) : (
+                <ul className="divide-y divide-slate-100">
+                  {data.urgentShifts.map((s) => (
+                    <li key={s.id}>
+                      <Link href="/rota" className="flex items-center justify-between gap-4 px-5 py-3 hover:bg-slate-50">
+                        <div className="min-w-0">
+                          <p className="text-sm font-semibold text-slate-900 truncate">{s.title}</p>
+                          <p className="text-xs text-slate-500">{s.branch?.name} · {fmtRange(s.startTime, s.endTime)}</p>
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0">
+                          {s.isEmergency && <Badge tone="rose">Emergency</Badge>}
+                          <span className="text-sm font-semibold text-slate-700">{gbp(s.hourlyRate)}/h</span>
+                          <StatusBadge status={s.status} />
+                          <ChevronRight className="w-4 h-4 text-slate-400" />
+                        </div>
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </Card>
+          </>
+        )}
       </main>
     </>
   );

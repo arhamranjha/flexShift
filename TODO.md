@@ -1,60 +1,59 @@
 # FlexShift Global TODO
 
-Consolidated from: Master Specification, B2B MVP Plan, Phase 1 Architecture Spec, Onboarding Roadmap, Execution Plan & Review Loop, READMEs, and the last agent summary. Status reflects code as of 2026-10-03.
+Consolidated from the Master Specification, B2B MVP Plan, Phase 1 Architecture Spec, Onboarding Roadmap, Execution Plan & Review Loop and the READMEs. Status as of 2026-10-03.
 
-Legend: [x] done · [~] partial · [ ] not started
+Legend: [x] done · [~] partly done · [ ] not started
 
-## Stage 1 — Backend (mostly done)
-- [x] Prisma schema (13+ models), seed, docker-compose Postgres
-- [x] Auth: login, relief-worker register, `/auth/me`, JWT + RBAC guards
-- [x] Orgs, branches (+ `/branches/:id/rota`), relief workers (concierge, docs, verify, prefs, watch, favourite)
-- [x] Staff bank CRUD, shifts (create/feed/assign/instant-book/apply), negotiations (propose/accept/counter/reject)
-- [x] Timesheets submit/approve → auto invoice, invoices (org list, my-finance, pay), leave (request/review + backfill)
-- [x] Concurrency hardening (transactional booking, overlap checks), bcryptjs standardisation
-- [x] Ad-hoc E2E happy path passed (not committed as tests)
-- [ ] Spec endpoints missing: `POST /auth/logout`, `PATCH /shifts/:id/status`, shift cancel, `PATCH /branches/:id`, org/branch update, user (manager) creation
-- [ ] Real document upload (multipart + S3 or local-disk adapter) — currently metadata-only `uploadDocument`
-- [ ] HTTP-only cookie auth (spec) vs bearer-only today
-- [ ] Tiered cascade dispatch automation (Tier1 → Tier2 → marketplace over time), not just visibility flag
-- [ ] Smart matching (systems/accreditations vs worker) + compliance gating on book/instant-book
-- [ ] Document expiry alerts (30/7-day) — scheduler + notifications
-- [ ] Notification system (email/in-app) for offers, counters, approvals
-- [ ] Org-specific credential checklists
-- [ ] BACS payroll CSV export; accounting export
-- [ ] Market-rate benchmarking; min-rate notification filter
-- [ ] Analytics endpoints (fill rate, spend, vacancies) for dashboard
-- [ ] Tenant-scoping audit of every service (org/branch isolation)
-- [ ] Automated tests (jest unit + e2e), eslint/prettier, `start:dev` watch mode, CI (GitLab CI)
-- [ ] Remove duplicate root `schema.prisma`; prisma migrations committed (currently none in repo)
-- [ ] Lock down CORS `*`, env validation, rate limiting, helmet
+## Backend (`apps/backend-api`)
+- [x] Auth, JWT + RBAC, logout/token revocation, change password, forced change of temporary passwords
+- [x] Tenant isolation on every module (`AccessService`), worker scoping, DTO validation everywhere
+- [x] Eligibility engine (documents, expiry, systems, accreditations, org-specific extra documents)
+- [x] Booking concurrency (worker row lock, conditional updates), negotiation/timesheet/invoice state machines
+- [x] Document upload (multipart, magic-byte check) behind a storage interface (local disk)
+- [x] Tiered cascade Tier 1 → 2 → 3 → marketplace (cron), staff-bank visibility rules
+- [x] Document expiry job (30/7-day warnings, expiring documents, un-verifies workers)
+- [x] In-app notifications; analytics overview; market-rate benchmark (min 5 shifts / 3 orgs)
+- [x] Migrations committed; seed is idempotent and date-relative
+- [x] 59 jest e2e tests incl. a contract test of the shared API client; CI config
+- [ ] S3 storage adapter (interface exists; local disk only)
+- [ ] Email delivery for notifications (in-app only)
+- [ ] Real BACS file: needs worker bank details (CSV payment batch exists, no sort code/account no.)
+- [ ] Accounting-software export
+- [ ] HTTP-only cookie auth (spec) — both apps use bearer tokens in localStorage
+- [ ] Leave overlap detection against the rota before approval
+- [ ] Per-organization document *verification* (today any in-scope organization can verify a worker's documents; verified status is global)
+- [ ] Worker distance/postcode filtering for the feed
+- [ ] ESLint + Prettier (lint script is type-checking only)
+- [ ] Emergency broadcast as a distinct dispatch mode (today it behaves as public)
 
-## Stage 2 — `apps/web-admin` (scaffolded: `/` dashboard, `/rota`)
-- [~] Dashboard `/` and Rota `/rota` exist (need install/build verification, real data wiring, Day/Week/Month)
-- [ ] Login page + auth/session handling + route protection, role-based nav (HQ vs branch)
-- [ ] `/staff-bank` tiers 1/2/3 + custom rates
-- [ ] `/shifts` create/publish (tags, systems, visibility), assign, cancel
-- [ ] `/compliance` review desk (queue, inspect, verify/reject with notes, GPhC badge)
-- [ ] `/workers` directory + concierge onboarding form
-- [ ] `/timesheets` + `/invoices` approvals, payment tracking, BACS export
-- [ ] `/leave` approval with backfill
-- [ ] `/negotiations` inbox (accept/counter/reject)
-- [ ] Settings: org/branch management, credential policy
-- [ ] Shared UI kit (Radix/Shadcn per spec), loading/error states, `.env` for API URL
+## Organization dashboard (`apps/web-admin`)
+- [x] Login, forced password change, role-aware navigation, branch scope picker
+- [x] Overview, multi-branch rota (day/week/month, assign, release), shifts (create/edit/publish/cancel, cascade option, market-rate hint)
+- [x] Rate negotiations inbox, staff bank (tiers, rates, invite by registration number), workers directory + concierge onboarding
+- [x] Compliance desk (review queue, previews, mandatory checklist), timesheets (single + bulk approval), invoices (pay, CSV export), leave (backfill), settings (org, branches, team, extra required credentials)
+- [x] Notification bell
+- [ ] Live browser walkthrough: pages compile, type-check and are covered by the client contract test, but nobody has clicked through them (browser tooling was unavailable)
+- [ ] Modal-level a11y beyond focus trap (labelled landmarks, screen-reader pass)
+- [ ] Clearing optional values (e.g. a staff-bank custom rate) once set
 
-## Stage 3 — `apps/worker-portal` (not created)
-- [ ] Scaffold Next.js mobile-first app; auth + self-registration (Phase 2 onboarding)
-- [ ] Shift feed tabs: For You / Watching / Favourites / Emergencies; distance + rate filters, gross payout
-- [ ] Shift detail: instant book, watch, apply, negotiate modal
-- [ ] My Shifts diary (calendar + list, status filters)
-- [ ] My Finance: invoices, payout status, earnings
-- [ ] Compliance passport + document upload, min-rate threshold
-- [ ] Timesheet submit (clock in/out)
+## Worker portal (`apps/worker-portal`)
+- [x] Register (2-step) / login, feed (For you, Watching, Favourites, Emergencies, filters), shift detail (instant book, apply, negotiate, accept counter)
+- [x] My shifts diary (list + calendar, timesheet submission), finance (invoices, timesheets), compliance passport + upload + preferences
+- [x] Notification bell
+- [ ] Live clock-in/out (timesheets are entered manually)
+- [ ] Clearing the minimum-rate threshold once set
+- [ ] Push / email notifications; installable PWA
 
-## Phase 3 / Infra (later)
-- [ ] Dockerfiles, Terraform/Terragrunt, EKS, GitLab CI, S3 bucket
-- [ ] Worker Pro tier (auto-invoicing, expense tracking, insights) — from original product brief
-- [ ] Mobile app (native) — out of scope for now
+## Infrastructure
+- [x] Dockerfiles (api, web-admin, worker-portal; built and API boot-tested), compose `--profile app`, `.gitlab-ci.yml`
+- [ ] Terraform / Terragrunt / EKS, S3 bucket, secrets management
+- [ ] Observability (structured logs, metrics, error tracking)
+
+## Later / product
+- [ ] Worker Pro tier (auto-invoicing for self-employed workers, expense tracking, insights)
+- [ ] Native mobile app
 
 ## Standing rules
-- Never introduce the prohibited legacy keyword (see Execution Plan) in code, schema, docs, or UI.
+- Never introduce the prohibited legacy keyword (see `FlexShift_Execution_Plan_and_Review_Loop.md`) in code, schema, docs or UI.
 - Review loop before/after each milestone: naming, architecture, concurrency, security/RBAC.
+- pnpm is the only package manager; Node 22.13+.

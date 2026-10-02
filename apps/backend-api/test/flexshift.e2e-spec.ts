@@ -1,0 +1,686 @@
+import { INestApplication } from '@nestjs/common';
+import { Test } from '@nestjs/testing';
+import * as request from 'supertest';
+import { AppModule } from '../src/app.module';
+import { configureApp } from '../src/bootstrap';
+import { PrismaService } from '../src/prisma/prisma.service';
+import { JobsService } from '../src/jobs/jobs.service';
+
+const PW = 'FlexShiftPass2026!';
+const DAY = 86_400_000;
+
+let app: INestApplication;
+let prisma: PrismaService;
+const api = () => request(app.getHttpServer());
+
+async function login(email: string, password = PW) {
+  const r = await api().post('/auth/login').send({ email, password }).expect(200);
+  return r.body.accessToken as string;
+}
+const get = (t: string, url: string) => api().get(url).set('Authorization', `Bearer ${t}`);
+const post = (t: string, url: string, body?: object) => api().post(url).set('Authorization', `Bearer ${t}`).send(body);
+const patch = (t: string, url: string, body?: object) => api().patch(url).set('Authorization', `Bearer ${t}`).send(body);
+
+/** UTC time `days` from now at `hour`:00. */
+const at = (days: number, hour: number) => {
+  const d = new Date(Date.now() + days * DAY);
+  d.setUTCHours(hour, 0, 0, 0);
+  return d.toISOString();
+};
+
+let superT: string, adminT: string, richmondT: string, beckenhamT: string, sarahT: string, davidT: string;
+let richmondId: string, beckenhamId: string, barkingId: string, apexId: string, crestId: string;
+let sarahId: string, davidId: string;
+
+beforeAll(async () => {
+  const mod = await Test.createTestingModule({ imports: [AppModule] }).compile();
+  app = mod.createNestApplication();
+  configureApp(app);
+  await app.init();
+  prisma = app.get(PrismaService);
+
+  [superT, adminT, richmondT, beckenhamT, sarahT, davidT] = await Promise.all([
+    login('super@flexshift.io'),
+    login('admin@apexhealth.co.uk'),
+    login('richmond.mgr@apexhealth.co.uk'),
+    login('beckenham.mgr@crestpharmacy.co.uk'),
+    login('sarah.y@flexrelief.co.uk'),
+    login('david.i@flexrelief.co.uk'),
+  ]);
+  const branches = (await get(superT, '/branches').expect(200)).body;
+  const byCode = (c: string) => branches.find((b: any) => b.branchCode === c);
+  richmondId = byCode('APEX-RCH-01').id;
+  beckenhamId = byCode('CRST-BCK-02').id;
+  barkingId = byCode('APEX-BRK-03').id;
+  apexId = byCode('APEX-RCH-01').organization.id;
+  crestId = byCode('CRST-BCK-02').organization.id;
+  sarahId = (await get(sarahT, '/auth/me')).body.reliefProfile.id;
+  davidId = (await get(davidT, '/auth/me')).body.reliefProfile.id;
+});
+
+afterAll(async () => {
+  await app.close();
+});
+
+const newShift = (token: string, over: Record<string, unknown> = {}) =>
+  post(token, '/shifts', {
+    branchId: richmondId,
+    title: 'Test shift',
+    startTime: at(10, 9),
+    endTime: at(10, 17),
+    hourlyRate: 30,
+    visibility: 'PUBLIC_MARKETPLACE',
+    ...over,
+  });
+
+describe('auth', () => {
+  it('rejects bad credentials and unknown fields', async () => {
+    await api().post('/auth/login').send({ email: 'sarah.y@flexrelief.co.uk', password: 'nope' }).expect(401);
+    await api().post('/auth/login').send({ email: 'sarah.y@flexrelief.co.uk', password: PW, admin: true }).expect(400);
+  });
+
+  it('requires a token', async () => {
+    await api().get('/shifts/feed').expect(401);
+  });
+
+  it('logout revokes previously issued tokens', async () => {
+    const t = await login('david.i@flexrelief.co.uk');
+    await get(t, '/auth/me').expect(200);
+    await post(t, '/auth/logout').expect(200);
+    await get(t, '/auth/me').expect(401);
+    davidT = await login('david.i@flexrelief.co.uk'); // fresh session for later tests
+  });
+});
+
+describe('tenant isolation', () => {
+  it('managers only see their own branch', async () => {
+    const r = await get(richmondT, '/branches').expect(200);
+    expect(r.body.map((b: any) => b.id)).toEqual([richmondId]);
+    await get(richmondT, `/branches/${beckenhamId}`).expect(404);
+    await get(richmondT, `/branches/${beckenhamId}/rota`).expect(404);
+    await get(richmondT, `/branches/${barkingId}`).expect(404); // same org, other branch
+  });
+
+  it('org admins see their org branches only', async () => {
+    const r = await get(adminT, '/branches').expect(200);
+    expect(r.body.map((b: any) => b.id).sort()).toEqual([richmondId, barkingId].sort());
+    await get(adminT, `/branches?organizationId=${crestId}`).expect(200).then((x) => expect(x.body.length).toBe(2));
+  });
+
+  it('blocks cross-org reads', async () => {
+    await get(adminT, `/staff-bank/organization/${crestId}`).expect(403);
+    await get(adminT, `/invoices/organization/${crestId}`).expect(403);
+    await get(adminT, `/organizations/${crestId}`).expect(403);
+    await get(beckenhamT, `/staff-bank/organization/${apexId}`).expect(403);
+    await get(richmondT, `/timesheets/branch/${beckenhamId}`).expect(404);
+    await get(richmondT, `/leave/branch/${beckenhamId}`).expect(404);
+    expect((await get(adminT, '/organizations').expect(200)).body.map((o: any) => o.id)).toEqual([apexId]);
+  });
+
+  it('blocks cross-org writes', async () => {
+    await newShift(richmondT, { branchId: beckenhamId }).expect(404);
+    await post(richmondT, '/staff-bank', { organizationId: crestId, reliefWorkerId: sarahId }).expect(403);
+    const s = (await get(beckenhamT, `/shifts?branchId=${beckenhamId}`).expect(200)).body[0];
+    await get(richmondT, `/shifts/${s.id}`).expect(404);
+    await patch(richmondT, `/shifts/${s.id}/status`, { status: 'CANCELLED' }).expect(404);
+    await patch(richmondT, `/shifts/${s.id}/assign`, { reliefWorkerId: sarahId }).expect(404);
+  });
+
+  it('workers cannot use staff endpoints or touch other workers', async () => {
+    await get(sarahT, '/branches').expect(403);
+    await get(sarahT, `/relief-workers/${davidId}`).expect(403);
+    await get(sarahT, '/relief-workers').expect(403);
+    await api()
+      .post(`/relief-workers/${davidId}/documents`)
+      .set('Authorization', `Bearer ${sarahT}`)
+      .field('type', 'OTHER')
+      .attach('file', Buffer.from('%PDF-1.4'), { filename: 'x.pdf', contentType: 'application/pdf' })
+      .expect(403);
+    await get(sarahT, `/relief-workers/${sarahId}`).expect(200);
+  });
+
+  it('org admins cannot create staff or branches in another org', async () => {
+    const b = await post(adminT, '/branches', {
+      organizationId: crestId, name: 'Sneaky', branchCode: 'SNEAK-01', addressLine1: '1 Rd', city: 'X', postcode: 'AB1 2CD', phone: '0123456789',
+    }).expect(201);
+    expect(b.body.organizationId).toBe(apexId); // forced to the caller's own org
+    await post(adminT, '/users', { email: 'x@y.co.uk', role: 'FACILITY_MANAGER', organizationId: crestId, branchId: beckenhamId }).expect(400);
+  });
+});
+
+describe('visibility and eligibility', () => {
+  it('staff-bank-only shifts are hidden from non-members', async () => {
+    const titles = async (t: string) => (await get(t, '/shifts/feed').expect(200)).body.map((s: any) => s.title);
+    expect(await titles(sarahT)).toContain('Staff Bank Pharmacist (Weekday)');
+    expect(await titles(davidT)).not.toContain('Staff Bank Pharmacist (Weekday)');
+    expect(await titles(davidT)).toContain('Open Marketplace Relief Pharmacist');
+  });
+
+  it('non-members cannot see, apply for or watch a staff-bank-only shift', async () => {
+    const s = (await get(richmondT, '/shifts?status=OPEN').expect(200)).body.find((x: any) => x.title.startsWith('Staff Bank'));
+    await get(davidT, `/shifts/${s.id}`).expect(404);
+    await post(davidT, `/shifts/${s.id}/apply`, {}).expect(404);
+    await post(davidT, `/relief-workers/me/watch-shift/${s.id}`).expect(404);
+    await post(sarahT, `/shifts/${s.id}/apply`, { notes: 'happy to help' }).expect(201);
+    await post(sarahT, `/shifts/${s.id}/apply`, {}).expect(400); // duplicate
+  });
+
+  it('enforces required systems and accreditations', async () => {
+    const s = (await get(superT, '/shifts?status=OPEN').expect(200)).body.find((x: any) => x.title.startsWith('Emergency Overnight'));
+    const r = await post(davidT, `/shifts/${s.id}/instant-book`).expect(403); // needs Nexphase, David lacks it
+    expect(JSON.stringify(r.body)).toMatch(/Nexphase/);
+  });
+
+  it('only org admins may override skills when assigning', async () => {
+    const s = (await get(superT, '/shifts?status=OPEN').expect(200)).body.find((x: any) => x.title.startsWith('Emergency Overnight'));
+    // Beckenham manager cannot override; David still lacks Nexphase
+    await patch(beckenhamT, `/shifts/${s.id}/assign`, { reliefWorkerId: davidId }).expect(403);
+    await patch(beckenhamT, `/shifts/${s.id}/assign`, { reliefWorkerId: davidId, overrideSkills: true }).expect(403);
+  });
+
+  it('workers with missing or expired documents cannot book', async () => {
+    const created = await post(richmondT, '/relief-workers/concierge', {
+      email: 'newbie@flexrelief.co.uk', firstName: 'New', lastName: 'Starter', phone: '07700900999', registrationNumber: 'GPHC-9999999',
+    }).expect(201);
+    expect(created.body.temporaryPassword).toBeTruthy();
+    expect(created.body.user.passwordHash).toBeUndefined();
+
+    const temp = await login('newbie@flexrelief.co.uk', created.body.temporaryPassword);
+    const me = await get(temp, '/auth/me').expect(200);
+    expect(me.body.mustChangePassword).toBe(true);
+    expect(me.body.tokenVersion).toBeUndefined();
+    await get(temp, '/shifts/feed').expect(403); // blocked until the temporary password is changed
+    const t = (await post(temp, '/auth/change-password', { currentPassword: created.body.temporaryPassword, newPassword: 'FreshPass123!' }).expect(200)).body.accessToken;
+    await get(t, '/shifts/feed').expect(200);
+
+    const shift = (await newShift(richmondT, { instantBookEnabled: true, startTime: at(11, 9), endTime: at(11, 17) }).expect(201)).body;
+    const r = await post(t, `/shifts/${shift.id}/instant-book`).expect(403);
+    expect(JSON.stringify(r.body)).toMatch(/IDENTITY/);
+
+    // Expired document is treated as missing
+    await prisma.complianceDocument.updateMany({
+      where: { reliefWorkerId: davidId, type: 'DBS_POLICE_CHECK' },
+      data: { expiresAt: new Date(Date.now() - DAY) },
+    });
+    const r2 = await post(davidT, `/shifts/${shift.id}/instant-book`).expect(403);
+    expect(JSON.stringify(r2.body)).toMatch(/DBS_POLICE_CHECK/);
+    await prisma.complianceDocument.updateMany({
+      where: { reliefWorkerId: davidId, type: 'DBS_POLICE_CHECK' },
+      data: { expiresAt: new Date(Date.now() + 500 * DAY) },
+    });
+  });
+
+  it('password change clears the flag and revokes the old token', async () => {
+    const created = await post(richmondT, '/relief-workers/concierge', {
+      email: 'pw@flexrelief.co.uk', firstName: 'P', lastName: 'W', phone: '07700900888', registrationNumber: 'GPHC-8888888',
+    }).expect(201);
+    const old = await login('pw@flexrelief.co.uk', created.body.temporaryPassword);
+    const changed = await post(old, '/auth/change-password', { currentPassword: created.body.temporaryPassword, newPassword: 'AnotherPass123!' }).expect(200);
+    await get(old, '/auth/me').expect(401);
+    expect((await get(changed.body.accessToken, '/auth/me').expect(200)).body.mustChangePassword).toBe(false);
+  });
+});
+
+describe('booking concurrency', () => {
+  it('rejects overlapping bookings for the same worker', async () => {
+    const a = (await newShift(richmondT, { instantBookEnabled: true, startTime: at(12, 9), endTime: at(12, 17) }).expect(201)).body;
+    const b = (await newShift(richmondT, { instantBookEnabled: true, startTime: at(12, 12), endTime: at(12, 20) }).expect(201)).body;
+    await post(sarahT, `/shifts/${a.id}/instant-book`).expect(201);
+    await post(sarahT, `/shifts/${b.id}/instant-book`).expect(409);
+    await patch(richmondT, `/shifts/${b.id}/assign`, { reliefWorkerId: sarahId }).expect(409);
+  });
+
+  it('lets exactly one of two simultaneous instant-books win', async () => {
+    const s = (await newShift(richmondT, { instantBookEnabled: true, startTime: at(14, 9), endTime: at(14, 17) }).expect(201)).body;
+    const [x, y] = await Promise.all([post(sarahT, `/shifts/${s.id}/instant-book`), post(davidT, `/shifts/${s.id}/instant-book`)]);
+    expect([x.status, y.status].filter((c) => c === 201)).toHaveLength(1);
+    expect([x.status, y.status].filter((c) => c !== 201)[0]).toBeGreaterThanOrEqual(400);
+    const final = (await get(richmondT, `/shifts/${s.id}`).expect(200)).body;
+    expect(final.status).toBe('BOOKED');
+  });
+
+  it('manager cancel releases the worker and closes pending items', async () => {
+    const s = (await newShift(richmondT, { startTime: at(16, 9), endTime: at(16, 17) }).expect(201)).body;
+    await patch(richmondT, `/shifts/${s.id}/assign`, { reliefWorkerId: davidId }).expect(200);
+    await patch(richmondT, `/shifts/${s.id}/status`, { status: 'COMPLETED' }).expect(400); // only via timesheet
+    const r = await patch(richmondT, `/shifts/${s.id}/status`, { status: 'CANCELLED' }).expect(200);
+    expect(r.body.status).toBe('CANCELLED');
+    expect(r.body.assignedWorkerId).toBeNull();
+    await patch(richmondT, `/shifts/${s.id}/status`, { status: 'OPEN' }).expect(400);
+  });
+
+  it('rejects shifts in the past or with inverted times', async () => {
+    await newShift(richmondT, { startTime: at(-1, 9), endTime: at(-1, 17) }).expect(400);
+    await newShift(richmondT, { startTime: at(5, 17), endTime: at(5, 9) }).expect(400);
+    await newShift(richmondT, { hourlyRate: -3 }).expect(400);
+  });
+});
+
+describe('rate negotiation', () => {
+  it('runs propose → counter → worker accepts, and guards bad transitions', async () => {
+    const s = (await newShift(richmondT, { startTime: at(20, 9), endTime: at(20, 17), hourlyRate: 32 }).expect(201)).body;
+    const neg = (await post(sarahT, '/negotiations', { shiftId: s.id, proposedHourlyRate: 38, message: 'weekend' }).expect(201)).body;
+    await post(sarahT, '/negotiations', { shiftId: s.id, proposedHourlyRate: 39 }).expect(400); // already open
+    expect((await get(richmondT, `/shifts/${s.id}`)).body.status).toBe('IN_NEGOTIATION');
+
+    await patch(sarahT, `/negotiations/${neg.id}/accept`).expect(400); // worker cannot accept own pending proposal
+    await patch(sarahT, `/negotiations/${neg.id}/counter`, { counterOfferRate: 35 }).expect(403); // staff only
+    await patch(beckenhamT, `/negotiations/${neg.id}/counter`, { counterOfferRate: 35 }).expect(404); // other tenant
+    await patch(richmondT, `/negotiations/${neg.id}/counter`, { counterOfferRate: 35 }).expect(200);
+    await patch(richmondT, `/negotiations/${neg.id}/counter`, { counterOfferRate: 34 }).expect(400); // already countered
+    await patch(davidT, `/negotiations/${neg.id}/accept`).expect(404); // someone else's
+
+    const booked = (await patch(sarahT, `/negotiations/${neg.id}/accept`).expect(200)).body;
+    expect(booked.status).toBe('BOOKED');
+    expect(Number(booked.hourlyRate)).toBe(35);
+    expect(Number(booked.totalEstimatedPay)).toBe(280);
+
+    await patch(richmondT, `/negotiations/${neg.id}/reject`).expect(400); // already accepted
+    expect((await get(richmondT, `/shifts/${s.id}`)).body.status).toBe('BOOKED'); // stays booked
+  });
+
+  it('reopens the shift when the last negotiation is rejected', async () => {
+    const s = (await newShift(richmondT, { startTime: at(22, 9), endTime: at(22, 17) }).expect(201)).body;
+    const neg = (await post(davidT, '/negotiations', { shiftId: s.id, proposedHourlyRate: 40 }).expect(201)).body;
+    await patch(richmondT, `/negotiations/${neg.id}/reject`).expect(200);
+    expect((await get(richmondT, `/shifts/${s.id}`)).body.status).toBe('OPEN');
+    const mine = (await get(davidT, '/negotiations/mine').expect(200)).body;
+    expect(mine.find((n: any) => n.id === neg.id).status).toBe('REJECTED');
+  });
+
+  it('hides other applicants from workers', async () => {
+    const s = (await newShift(richmondT, { startTime: at(24, 9), endTime: at(24, 17) }).expect(201)).body;
+    await post(sarahT, `/shifts/${s.id}/apply`, {}).expect(201);
+    await post(davidT, `/shifts/${s.id}/apply`, {}).expect(201);
+    const asDavid = (await get(davidT, `/shifts/${s.id}`).expect(200)).body;
+    expect(asDavid.applications).toHaveLength(1);
+    expect(asDavid.applications[0].reliefWorkerId).toBe(davidId);
+    const asManager = (await get(richmondT, `/shifts/${s.id}`).expect(200)).body;
+    expect(asManager.applications).toHaveLength(2);
+    // Booking Sarah rejects David's application
+    await patch(richmondT, `/shifts/${s.id}/assign`, { reliefWorkerId: sarahId }).expect(200);
+    const diary = (await get(davidT, '/shifts/mine').expect(200)).body;
+    expect(diary.applications.find((a: any) => a.shiftId === s.id).status).toBe('REJECTED');
+  });
+});
+
+describe('timesheets, invoices and payment', () => {
+  let timesheetId: string;
+  let invoiceId: string;
+  let invoiceNumber: string;
+
+  it('validates the clock times against the shift', async () => {
+    // A finished shift booked to Sarah (created directly, since the API refuses past shifts)
+    const start = new Date(Date.now() - 9 * 3_600_000);
+    const end = new Date(Date.now() - 1 * 3_600_000);
+    const shift = await prisma.shift.create({
+      data: {
+        branchId: richmondId, title: 'Finished shift', startTime: start, endTime: end, hourlyRate: 36, totalEstimatedPay: 288,
+        status: 'BOOKED', assignedWorkerId: sarahId, visibility: 'PUBLIC_MARKETPLACE', requiredSystems: [], requiredAccreditations: [],
+      },
+    });
+    const body = (over: object) => ({ shiftId: shift.id, clockInTime: start.toISOString(), clockOutTime: end.toISOString(), breakMinutes: 30, ...over });
+
+    await post(davidT, '/timesheets/submit', body({})).expect(400); // not assigned to David
+    await post(sarahT, '/timesheets/submit', body({ clockOutTime: new Date(Date.now() + DAY).toISOString() })).expect(400); // future
+    await post(sarahT, '/timesheets/submit', body({ clockInTime: new Date(start.getTime() - 5 * 3_600_000).toISOString() })).expect(400); // way early
+    await post(sarahT, '/timesheets/submit', body({ breakMinutes: 600 })).expect(400); // break > 480 / duration
+    const ok = await post(sarahT, '/timesheets/submit', body({})).expect(201);
+    expect(Number(ok.body.billableHours)).toBe(7.5);
+    expect(Number(ok.body.totalPayout)).toBe(270);
+    timesheetId = ok.body.id;
+  });
+
+  it('only the owning branch can approve, once', async () => {
+    await patch(beckenhamT, `/timesheets/${timesheetId}/approve`).expect(404);
+    await patch(sarahT, `/timesheets/${timesheetId}/approve`).expect(403);
+    const r = await patch(richmondT, `/timesheets/${timesheetId}/approve`).expect(200);
+    expect(r.body.invoice.invoiceNumber).toMatch(/^INV-\d{8}-[0-9A-F]{6}$/);
+    invoiceId = r.body.invoice.id;
+    invoiceNumber = r.body.invoice.invoiceNumber;
+    expect(Number(r.body.invoice.totalAmount)).toBe(270);
+    await patch(richmondT, `/timesheets/${timesheetId}/approve`).expect(400);
+    // approved timesheets cannot be changed by the worker
+    const ts = await prisma.timesheet.findUnique({ where: { id: timesheetId } });
+    await post(sarahT, '/timesheets/submit', { shiftId: ts.shiftId, clockInTime: ts.clockInTime, clockOutTime: ts.clockOutTime }).expect(400);
+  });
+
+  it('shows the worker their pending payout', async () => {
+    const f = (await get(sarahT, '/invoices/my-finance').expect(200)).body;
+    expect(f.pendingPayout).toBeGreaterThanOrEqual(270);
+  });
+
+  it('exports a payment batch CSV and marks invoices paid (org admin only, own org)', async () => {
+    await get(richmondT, `/invoices/organization/${apexId}`).expect(403); // managers cannot see finance
+    const csv = await get(adminT, `/invoices/organization/${apexId}/export.csv`).expect(200);
+    expect(csv.headers['content-type']).toMatch(/text\/csv/);
+    expect(csv.text).toContain(invoiceNumber);
+
+    await patch(adminT, `/invoices/${invoiceId}/pay`, {}).expect(400); // reference required
+    await patch(richmondT, `/invoices/${invoiceId}/pay`, { paymentReference: 'BACS-1' }).expect(403);
+    const paid = await patch(adminT, `/invoices/${invoiceId}/pay`, { paymentReference: 'BACS-0001' }).expect(200);
+    expect(paid.body.status).toBe('PAID');
+    await patch(adminT, `/invoices/${invoiceId}/pay`, { paymentReference: 'BACS-0002' }).expect(400); // already paid
+    expect((await prisma.timesheet.findUnique({ where: { id: timesheetId } })).status).toBe('SETTLED');
+  });
+});
+
+describe('compliance desk', () => {
+  it('uploads, reviews and gates document access', async () => {
+    await api()
+      .post(`/relief-workers/${sarahId}/documents`)
+      .set('Authorization', `Bearer ${sarahT}`)
+      .field('type', 'SAFEGUARDING_L3')
+      .attach('file', Buffer.from('not a pdf'), { filename: 'x.exe', contentType: 'application/x-msdownload' })
+      .expect(400);
+    await api().post(`/relief-workers/${sarahId}/documents`).set('Authorization', `Bearer ${sarahT}`).field('type', 'SAFEGUARDING_L3').expect(400); // no file
+
+    const doc = (
+      await api()
+        .post(`/relief-workers/${sarahId}/documents`)
+        .set('Authorization', `Bearer ${sarahT}`)
+        .field('type', 'SAFEGUARDING_L3')
+        .field('expiresAt', at(300, 0))
+        .attach('file', Buffer.from('%PDF-1.4 test'), { filename: 'sg3.pdf', contentType: 'application/pdf' })
+        .expect(201)
+    ).body;
+    expect(doc.status).toBe('PENDING');
+
+    const queue = (await get(richmondT, '/relief-workers/documents/queue').expect(200)).body;
+    expect(queue.some((d: any) => d.id === doc.id)).toBe(true);
+    await get(sarahT, '/relief-workers/documents/queue').expect(403);
+
+    await get(sarahT, `/relief-workers/documents/${doc.id}/file`).expect(200);
+    await get(davidT, `/relief-workers/documents/${doc.id}/file`).expect(403);
+    await get(richmondT, `/relief-workers/documents/${doc.id}/file`).expect(200);
+
+    await patch(sarahT, `/relief-workers/documents/${doc.id}/verify`, { status: 'VERIFIED' }).expect(403);
+    await patch(richmondT, `/relief-workers/documents/${doc.id}/verify`, { status: 'REJECTED' }).expect(400); // needs a note
+    await patch(richmondT, `/relief-workers/documents/${doc.id}/verify`, { status: 'PENDING' }).expect(400);
+    const v = await patch(richmondT, `/relief-workers/documents/${doc.id}/verify`, { status: 'VERIFIED', notes: 'ok' }).expect(200);
+    expect(v.body.status).toBe('VERIFIED');
+  });
+
+  it('un-verifies a worker when a mandatory document is rejected', async () => {
+    const dbs = await prisma.complianceDocument.findFirst({ where: { reliefWorkerId: davidId, type: 'INDEMNITY_INSURANCE' } });
+    await patch(richmondT, `/relief-workers/documents/${dbs.id}/verify`, { status: 'REJECTED', notes: 'illegible' }).expect(200);
+    expect((await prisma.reliefProfile.findUnique({ where: { id: davidId } })).isVerified).toBe(false);
+    await patch(richmondT, `/relief-workers/documents/${dbs.id}/verify`, { status: 'VERIFIED' }).expect(200);
+    expect((await prisma.reliefProfile.findUnique({ where: { id: davidId } })).isVerified).toBe(true);
+  });
+});
+
+describe('leave, staff bank and analytics', () => {
+  it('approves leave once and backfills a vacancy', async () => {
+    const leave = (
+      await post(richmondT, '/leave', {
+        branchId: richmondId, staffName: 'Jo Bloggs', staffRole: 'Pharmacist', startDate: at(30, 9), endDate: at(30, 17), leaveType: 'ANNUAL',
+      }).expect(201)
+    ).body;
+    await post(richmondT, '/leave', { branchId: richmondId, staffName: 'X', staffRole: 'Y', startDate: at(31, 9), endDate: at(30, 9) }).expect(400);
+    await patch(beckenhamT, `/leave/${leave.id}/review`, { status: 'APPROVED' }).expect(404);
+    await patch(richmondT, `/leave/${leave.id}/review`, { status: 'PENDING' }).expect(400);
+    const before = await prisma.shift.count({ where: { branchId: richmondId } });
+    await patch(richmondT, `/leave/${leave.id}/review`, { status: 'APPROVED', autoCreateShiftVacancy: true }).expect(200);
+    expect(await prisma.shift.count({ where: { branchId: richmondId } })).toBe(before + 1);
+    await patch(richmondT, `/leave/${leave.id}/review`, { status: 'REJECTED' }).expect(400); // already reviewed
+  });
+
+  it('manages staff bank within the caller org', async () => {
+    const member = (await post(adminT, '/staff-bank', { reliefWorkerId: davidId, tier: 'TIER_2_REGULAR', customHourlyRate: 33 }).expect(201)).body;
+    expect(member.organizationId).toBe(apexId);
+    await post(adminT, '/staff-bank', { reliefWorkerId: davidId }).expect(400); // duplicate
+    await post(adminT, '/staff-bank', { reliefWorkerId: sarahId, branchId: beckenhamId }).expect(400); // branch of another org
+    await patch(beckenhamT, `/staff-bank/${member.id}`, { tier: 'TIER_1_PREFERRED' }).expect(403);
+    await patch(adminT, `/staff-bank/${member.id}`, { tier: 'TIER_1_PREFERRED' }).expect(200);
+    // David is now a bank member, so he can see staff-bank-only shifts
+    const titles = (await get(davidT, '/shifts/feed').expect(200)).body.map((s: any) => s.title);
+    expect(titles).toContain('Staff Bank Pharmacist (Weekday)');
+    await api().delete(`/staff-bank/${member.id}`).set('Authorization', `Bearer ${beckenhamT}`).expect(403);
+    await api().delete(`/staff-bank/${member.id}`).set('Authorization', `Bearer ${adminT}`).expect(200);
+  });
+
+  it('returns scoped dashboard numbers', async () => {
+    const mgr = (await get(richmondT, '/analytics/overview').expect(200)).body;
+    expect(mgr.openShifts).toBeGreaterThan(0);
+    expect(typeof mgr.monthSpend).toBe('number');
+    const crest = (await get(beckenhamT, '/analytics/overview').expect(200)).body;
+    expect(crest.monthSpend).toBe(0); // no Crest invoices: Apex spend must not leak
+    await get(sarahT, '/analytics/overview').expect(403);
+    await get(richmondT, `/analytics/overview?branchId=${beckenhamId}`).expect(404);
+  });
+
+  it('creates managers via the users API (org admin only)', async () => {
+    await post(richmondT, '/users', { email: 'm@apexhealth.co.uk', role: 'FACILITY_MANAGER' }).expect(403);
+    const u = await post(adminT, '/users', { email: 'barking.mgr@apexhealth.co.uk', role: 'FACILITY_MANAGER', branchId: barkingId }).expect(201);
+    expect(u.body.temporaryPassword).toBeTruthy();
+    const temp = await login('barking.mgr@apexhealth.co.uk', u.body.temporaryPassword);
+    await get(temp, '/branches').expect(403); // temporary password must be changed first
+    const t = (await post(temp, '/auth/change-password', { currentPassword: u.body.temporaryPassword, newPassword: 'ManagerPass123!' }).expect(200)).body.accessToken;
+    expect((await get(t, '/branches').expect(200)).body.map((b: any) => b.id)).toEqual([barkingId]);
+  });
+});
+
+describe('review-loop regressions', () => {
+  it('scopes worker data to the caller organization', async () => {
+    const list = (await get(beckenhamT, '/relief-workers').expect(200)).body.map((w: any) => w.id);
+    expect(list).not.toContain(sarahId);
+    await get(beckenhamT, `/relief-workers/${sarahId}`).expect(404);
+    const found = (await get(beckenhamT, '/relief-workers/lookup?registrationNumber=GPHC-2089412').expect(200)).body;
+    expect(found.id).toBe(sarahId);
+    expect(found.user).toBeUndefined(); // minimal projection, no email
+    await get(beckenhamT, '/relief-workers/lookup?registrationNumber=GPHC-0000000').expect(404);
+
+    const queue = (await get(beckenhamT, '/relief-workers/documents/queue').expect(200)).body;
+    expect(queue).toHaveLength(0);
+    const pending = await prisma.complianceDocument.findFirst({ where: { reliefWorkerId: davidId, status: 'PENDING' } });
+    await patch(beckenhamT, `/relief-workers/documents/${pending.id}/verify`, { status: 'VERIFIED' }).expect(404);
+    await get(beckenhamT, `/relief-workers/documents/${pending.id}/file`).expect(404);
+
+    // Apex staff see their own worker, but only Apex data about them
+    const w = (await get(adminT, `/relief-workers/${sarahId}`).expect(200)).body;
+    expect(w.staffBankMemberships.every((m: any) => m.organizationId === apexId)).toBe(true);
+  });
+
+  it('managers cannot edit org-wide staff bank entries', async () => {
+    const m = (await post(adminT, '/staff-bank', { reliefWorkerId: davidId }).expect(201)).body; // no branch => org-wide
+    await patch(richmondT, `/staff-bank/${m.id}`, { tier: 'TIER_3_RESERVE' }).expect(404);
+    await api().delete(`/staff-bank/${m.id}`).set('Authorization', `Bearer ${adminT}`).expect(200);
+  });
+
+  it('rejects uploads whose content does not match the declared type', async () => {
+    await api()
+      .post(`/relief-workers/${sarahId}/documents`)
+      .set('Authorization', `Bearer ${sarahT}`)
+      .field('type', 'OTHER')
+      .attach('file', Buffer.from('<html><script>alert(1)</script></html>'), { filename: 'evil.pdf', contentType: 'application/pdf' })
+      .expect(400);
+  });
+
+  it('freezes pay terms once a shift is booked', async () => {
+    const s = (await newShift(richmondT, { startTime: at(26, 9), endTime: at(26, 17) }).expect(201)).body;
+    await patch(richmondT, `/shifts/${s.id}`, { hourlyRate: 31 }).expect(200); // open: allowed
+    await patch(richmondT, `/shifts/${s.id}/assign`, { reliefWorkerId: sarahId }).expect(200);
+    await patch(richmondT, `/shifts/${s.id}`, { hourlyRate: 99 }).expect(400);
+    await patch(richmondT, `/shifts/${s.id}`, { visibility: 'STAFF_BANK_ONLY' }).expect(400);
+    await patch(richmondT, `/shifts/${s.id}`, { notes: 'Bring ID' }).expect(200);
+  });
+
+  it('a released worker cannot be paid for a pending timesheet', async () => {
+    const start = new Date(Date.now() - 6 * 3_600_000);
+    const end = new Date(Date.now() - 1 * 3_600_000);
+    const shift = await prisma.shift.create({
+      data: {
+        branchId: richmondId, title: 'Released shift', startTime: start, endTime: end, hourlyRate: 30, totalEstimatedPay: 150,
+        status: 'BOOKED', assignedWorkerId: davidId, visibility: 'PUBLIC_MARKETPLACE', requiredSystems: [], requiredAccreditations: [],
+      },
+    });
+    const ts = (await post(davidT, '/timesheets/submit', { shiftId: shift.id, clockInTime: start.toISOString(), clockOutTime: end.toISOString() }).expect(201)).body;
+    await patch(richmondT, `/shifts/${shift.id}/status`, { status: 'OPEN' }).expect(200); // manager releases the worker
+    await patch(richmondT, `/timesheets/${ts.id}/approve`).expect(404); // timesheet was withdrawn with the release
+  });
+
+  it('creates one vacancy per day for multi-day leave and validates the dates', async () => {
+    const leave = (
+      await post(richmondT, '/leave', { branchId: richmondId, staffName: 'Al Away', staffRole: 'Pharmacist', startDate: at(40, 0), endDate: at(42, 0) }).expect(201)
+    ).body;
+    const before = await prisma.shift.count({ where: { branchId: richmondId } });
+    await patch(richmondT, `/leave/${leave.id}/review`, { status: 'APPROVED', autoCreateShiftVacancy: true, backfillHourlyRate: 33 }).expect(200);
+    expect(await prisma.shift.count({ where: { branchId: richmondId } })).toBe(before + 3);
+    const past = (await post(richmondT, '/leave', { branchId: richmondId, staffName: 'Old', staffRole: 'Pharmacist', startDate: at(-5, 9), endDate: at(-5, 17) }).expect(201)).body;
+    await patch(richmondT, `/leave/${past.id}/review`, { status: 'APPROVED', autoCreateShiftVacancy: true }).expect(400);
+  });
+
+  it('serialises concurrent overlapping bookings for one worker', async () => {
+    const a = (await newShift(richmondT, { instantBookEnabled: true, startTime: at(30, 9), endTime: at(30, 17) }).expect(201)).body;
+    const b = (await newShift(richmondT, { instantBookEnabled: true, startTime: at(30, 13), endTime: at(30, 21) }).expect(201)).body;
+    const [x, y] = await Promise.all([post(davidT, `/shifts/${a.id}/instant-book`), post(davidT, `/shifts/${b.id}/instant-book`)]);
+    expect([x.status, y.status].filter((c) => c === 201)).toHaveLength(1);
+  });
+
+  it('does not let inactive users sign in', async () => {
+    const u = await post(adminT, '/users', { email: 'gone@apexhealth.co.uk', role: 'FACILITY_MANAGER' }).expect(201);
+    await patch(adminT, `/users/${u.body.id}`, { isActive: false }).expect(200);
+    await api().post('/auth/login').send({ email: 'gone@apexhealth.co.uk', password: u.body.temporaryPassword }).expect(401);
+  });
+});
+
+describe('automation: cascade, expiry, notifications, checklists, benchmarks', () => {
+  const feedTitles = async (t: string) => (await get(t, '/shifts/feed').expect(200)).body.map((x: any) => x.title);
+
+  it('releases staff-bank shifts tier by tier, then to the marketplace', async () => {
+    const jobs = app.get(JobsService);
+    // David joins the Apex bank as Tier 2; Sarah is Tier 1.
+    const member = (await post(adminT, '/staff-bank', { reliefWorkerId: davidId, tier: 'TIER_2_REGULAR' }).expect(201)).body;
+    const title = `Cascade shift ${Date.now()}`;
+    const shift = (await post(richmondT, '/shifts', { branchId: richmondId, title, startTime: at(35, 9), endTime: at(35, 17), hourlyRate: 31, visibility: 'STAFF_BANK_ONLY' }).expect(201)).body;
+    expect(shift.cascadeStage).toBe(1);
+
+    expect(await feedTitles(sarahT)).toContain(title); // Tier 1 sees it straight away
+    expect(await feedTitles(davidT)).not.toContain(title); // Tier 2 has to wait
+    await get(davidT, `/shifts/${shift.id}`).expect(404);
+
+    const due = () => prisma.shift.update({ where: { id: shift.id }, data: { nextCascadeAt: new Date(Date.now() - 1000) } });
+    await due();
+    await jobs.runCascade();
+    expect((await prisma.shift.findUnique({ where: { id: shift.id } })).cascadeStage).toBe(2);
+    expect(await feedTitles(davidT)).toContain(title);
+
+    await due(); await jobs.runCascade(); // stage 3 (Tier 3 reserve)
+    await due(); await jobs.runCascade(); // marketplace
+    const final = await prisma.shift.findUnique({ where: { id: shift.id } });
+    expect(final.visibility).toBe('PUBLIC_MARKETPLACE');
+    expect(final.nextCascadeAt).toBeNull();
+
+    // Tier 2 members were notified when their tier was released
+    const notes = (await get(davidT, '/notifications').expect(200)).body;
+    expect(notes.items.some((n: any) => n.type === 'NEW_SHIFT' && n.link === `/shifts/${shift.id}`)).toBe(true);
+    await api().delete(`/staff-bank/${member.id}`).set('Authorization', `Bearer ${adminT}`).expect(200);
+  });
+
+  it('delivers and clears in-app notifications', async () => {
+    const mine = (await get(richmondT, '/notifications').expect(200)).body;
+    expect(mine.items.some((n: any) => n.type === 'NEGOTIATION_PROPOSED')).toBe(true);
+    expect(mine.unread).toBeGreaterThan(0);
+    await post(richmondT, `/notifications/${mine.items[0].id}/read`).expect(200);
+    await post(richmondT, '/notifications/read-all').expect(200);
+    expect((await get(richmondT, '/notifications').expect(200)).body.unread).toBe(0);
+    // Someone else's notification id is a silent no-op
+    await post(sarahT, `/notifications/${mine.items[0].id}/read`).expect(200);
+    expect((await prisma.notification.findUnique({ where: { id: mine.items[0].id } })).readAt).not.toBeNull();
+  });
+
+  it('warns about expiring documents once, then expires them and un-verifies the worker', async () => {
+    const jobs = app.get(JobsService);
+    const doc = await prisma.complianceDocument.findFirst({ where: { reliefWorkerId: davidId, type: 'IDENTITY' } });
+    await prisma.complianceDocument.update({ where: { id: doc.id }, data: { expiresAt: new Date(Date.now() + 5 * DAY) } });
+
+    const first = await jobs.runExpiry();
+    expect(first.warned).toBeGreaterThanOrEqual(1);
+    const second = await jobs.runExpiry();
+    expect(second.warned).toBe(0); // no repeat warnings
+    const notes = (await get(davidT, '/notifications').expect(200)).body.items;
+    expect(notes.some((n: any) => n.type === 'DOCUMENT_EXPIRING')).toBe(true);
+
+    await prisma.complianceDocument.update({ where: { id: doc.id }, data: { expiresAt: new Date(Date.now() - 1000) } });
+    const third = await jobs.runExpiry();
+    expect(third.expired).toBe(1);
+    expect((await prisma.complianceDocument.findUnique({ where: { id: doc.id } })).status).toBe('EXPIRED');
+    expect((await prisma.reliefProfile.findUnique({ where: { id: davidId } })).isVerified).toBe(false);
+
+    // restore for any later test
+    await prisma.complianceDocument.update({ where: { id: doc.id }, data: { status: 'VERIFIED', expiresAt: new Date(Date.now() + 500 * DAY), expiryNotified7: false, expiryNotified30: false } });
+    await prisma.reliefProfile.update({ where: { id: davidId }, data: { isVerified: true } });
+  });
+
+  it('enforces organization-specific credential checklists', async () => {
+    await patch(richmondT, `/organizations/${apexId}`, { requiredDocTypes: ['SAFEGUARDING_L3'] }).expect(403); // admins only
+    await patch(adminT, `/organizations/${apexId}`, { requiredDocTypes: ['NOT_A_TYPE'] }).expect(400);
+    await patch(adminT, `/organizations/${apexId}`, { requiredDocTypes: ['SAFEGUARDING_L3'] }).expect(200);
+    try {
+      const s = (await newShift(richmondT, { instantBookEnabled: true, startTime: at(50, 9), endTime: at(50, 17) }).expect(201)).body;
+      const r = await post(davidT, `/shifts/${s.id}/instant-book`).expect(403); // David's safeguarding doc is still pending
+      expect(JSON.stringify(r.body)).toMatch(/SAFEGUARDING_L3/);
+      await post(sarahT, `/shifts/${s.id}/instant-book`).expect(201); // Sarah's was verified earlier
+    } finally {
+      await patch(adminT, `/organizations/${apexId}`, { requiredDocTypes: [] }).expect(200);
+    }
+  });
+
+  it('serves anonymised market-rate benchmarks to staff only', async () => {
+    const r = (await get(richmondT, '/analytics/market-rates?profession=Pharmacist').expect(200)).body;
+    expect(r.profession).toBe('Pharmacist');
+    expect(typeof r.sampleSize).toBe('number');
+    // Needs >=5 shifts from >=3 organizations; the seed has only 2 organizations, so it must be withheld.
+    expect(r.median).toBeNull();
+    expect(r.p25).toBeNull();
+    await get(sarahT, '/analytics/market-rates').expect(403);
+  });
+
+  it('hides closed shifts from workers who are not involved', async () => {
+    const s = (await newShift(richmondT, { startTime: at(55, 9), endTime: at(55, 17) }).expect(201)).body;
+    await get(davidT, `/shifts/${s.id}`).expect(200); // open + public: visible
+    await patch(richmondT, `/shifts/${s.id}/assign`, { reliefWorkerId: sarahId }).expect(200);
+    await get(davidT, `/shifts/${s.id}`).expect(404); // booked to someone else: gone
+    await get(sarahT, `/shifts/${s.id}`).expect(200); // her own booking stays visible
+  });
+
+  it('resumes the cascade timer when a booked shift is released', async () => {
+    const jobs = app.get(JobsService);
+    const s = (await post(richmondT, '/shifts', { branchId: richmondId, title: `Release ${Date.now()}`, startTime: at(56, 9), endTime: at(56, 17), hourlyRate: 31, visibility: 'STAFF_BANK_ONLY' }).expect(201)).body;
+    await patch(richmondT, `/shifts/${s.id}/assign`, { reliefWorkerId: sarahId }).expect(200);
+    await jobs.runCascade(); // booked shifts have their timer cleared
+    expect((await prisma.shift.findUnique({ where: { id: s.id } })).nextCascadeAt).toBeNull();
+    await patch(richmondT, `/shifts/${s.id}/status`, { status: 'OPEN' }).expect(200);
+    const after = await prisma.shift.findUnique({ where: { id: s.id } });
+    expect(after.cascadeStage).toBe(1);
+    expect(after.nextCascadeAt).not.toBeNull(); // cascading again
+  });
+
+  it('does not cascade a shift that has already started', async () => {
+    const jobs = app.get(JobsService);
+    const shift = await prisma.shift.create({
+      data: {
+        branchId: richmondId, title: 'Already started', startTime: new Date(Date.now() - 3_600_000), endTime: new Date(Date.now() + 3_600_000),
+        hourlyRate: 30, totalEstimatedPay: 60, status: 'OPEN', visibility: 'STAFF_BANK_ONLY', requiredSystems: [], requiredAccreditations: [],
+        cascadeStage: 1, nextCascadeAt: new Date(Date.now() - 1000),
+      },
+    });
+    await jobs.runCascade();
+    expect((await prisma.shift.findUnique({ where: { id: shift.id } })).cascadeStage).toBe(1);
+  });
+
+  it('tells managers when a booked worker\'s document lapses', async () => {
+    const jobs = app.get(JobsService);
+    const s = (await newShift(richmondT, { startTime: at(57, 9), endTime: at(57, 17) }).expect(201)).body;
+    await patch(richmondT, `/shifts/${s.id}/assign`, { reliefWorkerId: davidId }).expect(200);
+    const doc = await prisma.complianceDocument.findFirst({ where: { reliefWorkerId: davidId, type: 'RIGHT_TO_WORK' } });
+    await prisma.complianceDocument.update({ where: { id: doc.id }, data: { expiresAt: new Date(Date.now() - 1000) } });
+    await jobs.runExpiry();
+    const notes = (await get(richmondT, '/notifications').expect(200)).body.items;
+    expect(notes.some((n: any) => n.type === 'WORKER_COMPLIANCE_LAPSED' && n.body.includes(s.title))).toBe(true);
+    await prisma.complianceDocument.update({ where: { id: doc.id }, data: { status: 'VERIFIED', expiresAt: new Date(Date.now() + 500 * DAY), expiryNotified7: false, expiryNotified30: false } });
+    await prisma.reliefProfile.update({ where: { id: davidId }, data: { isVerified: true } });
+    await patch(richmondT, `/shifts/${s.id}/status`, { status: 'CANCELLED' }).expect(200);
+  });
+});

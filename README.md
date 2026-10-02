@@ -19,24 +19,16 @@ FlexShift is a clean-room, two-sided workforce management SaaS and flexible shif
 ```text
 flexShift/
 ├── apps/
-│   ├── backend-api/            # NestJS + TypeScript Enterprise API
-│   │   ├── prisma/             # schema.prisma & seed data
-│   │   ├── src/
-│   │   │   ├── auth/           # JWT & RBAC (Org Admin, Facility Manager, Relief Worker)
-│   │   │   ├── organizations/  # Multi-tenant healthcare groups
-│   │   │   ├── branches/       # Facility branches & rota endpoints
-│   │   │   ├── relief-workers/ # Worker profiles, compliance passports & verification
-│   │   │   ├── staff-bank/     # Internal worker pools & tiered cascades
-│   │   │   ├── shifts/         # Rota scheduling, instant book & feeds
-│   │   │   ├── negotiations/   # Worker rate counter-offers & approvals
-│   │   │   ├── timesheets/     # Digital shift check-in/out & approvals
-│   │   │   ├── invoices/       # Automated invoicing & financial analytics
-│   │   │   └── leave/          # Leave requests & auto-vacancy backfilling
-│   │   └── package.json
-│   └── web-admin/              # Next.js B2B Admin Dashboard (Coming in Phase 2)
-├── docker-compose.yml          # PostgreSQL database service
-├── pnpm-workspace.yaml         # Monorepo configuration
-└── schema.prisma               # Master Prisma database schema
+│   ├── backend-api/        # NestJS + Prisma API (auth, tenancy, rota, marketplace, billing, jobs)
+│   ├── web-admin/          # Next.js dashboard for organization admins & branch managers (:3000)
+│   └── worker-portal/      # Mobile-first Next.js portal for relief workers (:3001)
+├── packages/
+│   ├── api-client/         # Typed fetch client + domain types shared by both frontends
+│   └── ui/                 # Shared React components (Button, Modal, Toast, useAsync, ...)
+├── docker-compose.yml      # Postgres (default) and the full stack (`--profile app`)
+├── .gitlab-ci.yml          # lint + e2e tests + builds
+├── TODO.md                 # Global checklist and what is still open
+└── pnpm-workspace.yaml
 ```
 
 ---
@@ -44,53 +36,75 @@ flexShift/
 ## 3. Getting Started
 
 ### Prerequisites
-* Node.js v20+ LTS
-* pnpm v9+ or npm v10+
+* Node.js 22.13+ (pnpm 11 requires it) and pnpm (`corepack enable` picks the pinned version)
 * Docker & Docker Compose
 
-### 1. Start the PostgreSQL Database
+### 1. Install and start Postgres
 ```bash
+pnpm install
 docker compose up -d
 ```
 
-### 2. Configure Environment Variables
+### 2. Configure and migrate the API
 ```bash
 cd apps/backend-api
-cp .env.example .env
+cp .env.example .env            # then set JWT_SECRET (>= 32 chars): openssl rand -base64 48
+pnpm exec prisma migrate deploy
+pnpm seed                       # demo organizations, branches, workers and shifts
 ```
 
-### 3. Generate Prisma Client & Migrate
+### 3. Run everything
 ```bash
-pnpm --filter backend-api prisma:generate
-pnpm --filter backend-api prisma:migrate
+pnpm dev:backend     # http://localhost:4000   (Swagger: /api/docs)
+pnpm dev:web         # http://localhost:3000   organization dashboard
+pnpm dev:portal      # http://localhost:3001   relief worker portal
 ```
 
-### 4. Seed the Database
+Demo logins (password `FlexShiftPass2026!`, created by the seed):
+
+| Who | Email | Uses |
+| :--- | :--- | :--- |
+| Super admin | `super@flexshift.io` | dashboard |
+| Org admin (Apex) | `admin@apexhealth.co.uk` | dashboard |
+| Branch manager (Richmond) | `richmond.mgr@apexhealth.co.uk` | dashboard |
+| Branch manager (Crest, Beckenham) | `beckenham.mgr@crestpharmacy.co.uk` | dashboard |
+| Relief worker (Tier 1, Apex bank) | `sarah.y@flexrelief.co.uk` | worker portal |
+| Relief worker (marketplace only) | `david.i@flexrelief.co.uk` | worker portal |
+
+### Tests
 ```bash
-npx ts-node prisma/seed.ts
+pnpm test:backend    # jest e2e against its own database (flexshift_test, rebuilt every run)
+pnpm lint            # type-checks every workspace package
 ```
+The test database must exist once: `docker exec flexshift-postgres psql -U postgres -c "CREATE DATABASE flexshift_test"`.
+Do not run two test processes at the same time; they share that database.
 
-### 5. Start the Development Server
+### Full stack in containers
 ```bash
-pnpm --filter backend-api start:dev
+JWT_SECRET=$(openssl rand -base64 48) docker compose --profile app up --build
 ```
-
-The API will be running at `http://localhost:4000`.  
-Swagger OpenAPI interactive documentation is available at `http://localhost:4000/api/docs`.
 
 ---
 
-## 4. API Modules Summary
+## 4. How it works
 
-| Module | Route Prefix | Key Functionality |
-| :--- | :--- | :--- |
-| **Auth** | `/auth` | Login, relief worker registration, session validation |
-| **Organizations** | `/organizations` | Healthcare group management, billing terms |
-| **Branches** | `/branches` | Branch details, rota schedules (`/branches/:id/rota`) |
-| **Relief Workers** | `/relief-workers` | Worker profiles, concierge onboarding, compliance docs |
-| **Staff Bank** | `/staff-bank` | Internal bank rosters, tiered dispatch |
-| **Shifts** | `/shifts` | Rota creation, worker feeds (`/shifts/feed`), instant booking |
-| **Negotiations** | `/negotiations` | Rate counter-offers, accept/counter/reject |
-| **Timesheets** | `/timesheets` | Clock-in/out, hours validation, manager sign-off |
-| **Invoices** | `/invoices` | Automated invoice generation, payout tracking |
-| **Leave** | `/leave` | Absence requests, automatic shift vacancy backfill |
+* **Tenancy:** organization → facility branch. Org admins see all their branches, branch managers only their own; every query goes through `AccessService` (`apps/backend-api/src/common/access.service.ts`). Other tenants' ids return 404/403.
+* **Compliance gating:** a worker can only be booked with verified, unexpired Identity, Right to Work, DBS and Indemnity documents (plus anything the organization adds under Settings) and the shift's required systems/accreditations. One rule, `shifts/eligibility.ts`, covers instant book, apply, negotiate and manager assignment.
+* **Tiered cascade:** staff-bank shifts go to Tier 1 first, then Tier 2, Tier 3 and finally the open marketplace, one step per `CASCADE_DELAY_MINUTES` (a cron job).
+* **Money flow:** shift → (apply / negotiate / instant book / assign) → timesheet → manager approval → invoice → org admin marks paid (CSV payment batch export available).
+* **Notifications:** in-app (bell icon) for proposals, counters, bookings, timesheets, invoices, document reviews, expiry warnings (30 and 7 days) and new-shift releases.
+
+## 5. API surface
+
+| Module | Routes |
+| :--- | :--- |
+| Auth | `POST /auth/login`, `/auth/register/relief-worker`, `/auth/logout`, `/auth/change-password`, `GET /auth/me` |
+| Organizations / Users | `/organizations`, `/users` (invite managers; one-time temporary password) |
+| Branches | `/branches`, `/branches/:id/rota` |
+| Shifts | `/shifts` (list/create/update/status/assign), `/shifts/feed`, `/shifts/mine`, `/shifts/:id/instant-book`, `/shifts/:id/apply` |
+| Negotiations | `/negotiations` (+ `/mine`, `:id/accept`, `:id/counter`, `:id/reject`) |
+| Staff bank | `/staff-bank` |
+| Relief workers | `/relief-workers` (+ `/lookup`, concierge onboarding, document upload/queue/verify/file, `/me/preferences`) |
+| Timesheets / Invoices | `/timesheets`, `/invoices` (+ `/organization/:id/export.csv`) |
+| Leave | `/leave` (approval can create backfill vacancies) |
+| Analytics / Notifications | `/analytics/overview`, `/analytics/market-rates`, `/notifications` |

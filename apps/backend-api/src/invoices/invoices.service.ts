@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { PrismaService } from '../prisma/prisma.service';
 import { InvoiceStatus } from '@prisma/client';
 import { AccessService, AuthUser } from '../common/access.service';
+import { NotificationsService } from '../notifications/notifications.service';
 
 const csvCell = (v: unknown) => {
   let s = String(v ?? '');
@@ -15,6 +16,7 @@ export class InvoicesService {
   constructor(
     private prisma: PrismaService,
     private access: AccessService,
+    private notifications: NotificationsService,
   ) {}
 
   async findByOrganization(user: AuthUser, organizationId: string, status?: InvoiceStatus) {
@@ -62,6 +64,9 @@ export class InvoicesService {
     await this.prisma.timesheet.updateMany({
       where: { id: invoice.timesheetId ?? '', status: 'APPROVED' },
       data: { status: 'SETTLED' },
+    });
+    await this.notifications.notifyWorker(invoice.reliefWorkerId, {
+      type: 'INVOICE_PAID', title: 'Invoice paid', body: `${invoice.invoiceNumber} · ref ${paymentReference}`, link: '/finance',
     });
     return this.prisma.invoice.findUnique({ where: { id } });
   }

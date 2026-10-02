@@ -4,6 +4,7 @@ import { TimesheetStatus, InvoiceStatus, ShiftStatus } from '@prisma/client';
 import { randomBytes } from 'crypto';
 import { AccessService, AuthUser } from '../common/access.service';
 import { SubmitTimesheetDto } from './dto/timesheet.dto';
+import { NotificationsService } from '../notifications/notifications.service';
 
 const MINUTE = 60_000;
 /** Clock-in may be up to 1h before the shift starts; clock-out up to 4h after it ends. */
@@ -15,6 +16,7 @@ export class TimesheetsService {
   constructor(
     private prisma: PrismaService,
     private access: AccessService,
+    private notifications: NotificationsService,
   ) {}
 
   async submitTimesheet(reliefWorkerId: string, dto: SubmitTimesheetDto) {
@@ -86,12 +88,15 @@ export class TimesheetsService {
         data: values,
       });
       if (res.count === 0) throw new ConflictException('Timesheet was already processed');
-      return this.prisma.timesheet.findUnique({ where: { shiftId: data.shiftId }, include: { shift: true, branch: true } });
+    } else {
+      await this.prisma.timesheet.create({
+        data: { shiftId: data.shiftId, reliefWorkerId: data.reliefWorkerId, branchId: shift.branchId, ...values },
+      });
     }
-    return this.prisma.timesheet.create({
-      data: { shiftId: data.shiftId, reliefWorkerId: data.reliefWorkerId, branchId: shift.branchId, ...values },
-      include: { shift: true, branch: true },
+    await this.notifications.notifyBranchStaff(shift.branchId, {
+      type: 'TIMESHEET_SUBMITTED', title: 'Timesheet awaiting approval', body: shift.title, link: '/timesheets',
     });
+    return this.prisma.timesheet.findUnique({ where: { shiftId: data.shiftId }, include: { shift: true, branch: true } });
   }
 
   async approveTimesheet(timesheetId: string, user: AuthUser) {
@@ -105,7 +110,7 @@ export class TimesheetsService {
       throw new BadRequestException(`Only submitted timesheets can be approved (current: ${ts.status})`);
     }
 
-    return this.prisma.$transaction(async (tx) => {
+    const result = await this.prisma.$transaction(async (tx) => {
       const res = await tx.timesheet.updateMany({
         where: { id: timesheetId, status: TimesheetStatus.SUBMITTED },
         data: {
@@ -147,6 +152,10 @@ export class TimesheetsService {
 
       return { timesheet: updatedTs, invoice };
     });
+    await this.notifications.notifyWorker(ts.reliefWorkerId, {
+      type: 'TIMESHEET_APPROVED', title: 'Timesheet approved: invoice issued', body: `${result.invoice.invoiceNumber} · £${Number(result.invoice.totalAmount).toFixed(2)}`, link: '/finance',
+    });
+    return result;
   }
 
   async findByBranch(user: AuthUser, branchId: string, status?: TimesheetStatus) {
