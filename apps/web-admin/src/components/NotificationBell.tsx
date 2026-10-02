@@ -55,7 +55,7 @@ export function NotificationBell() {
           <div className="flex items-center justify-between px-4 py-2.5 border-b border-slate-100">
             <span className="text-sm font-bold text-slate-900">Notifications</span>
             {feed.unread > 0 && (
-              <button className="text-xs font-semibold text-emerald-700 hover:underline" onClick={() => api.notifications.markAllRead().then(load)}>
+              <button className="text-xs font-semibold text-emerald-700 hover:underline" onClick={() => api.notifications.markAllRead().then(load, () => {})}>
                 Mark all read
               </button>
             )}
@@ -81,7 +81,8 @@ export function NotificationBell() {
                 onChange={(e) => {
                   const next = e.target.checked;
                   setFeed((f) => ({ ...f, emailEnabled: next }));
-                  api.notifications.setEmailEnabled(next).catch(load);
+                  // Roll back to the previous value if saving fails (a poll in between cannot hide the failure).
+                  api.notifications.setEmailEnabled(next).catch(() => setFeed((f) => ({ ...f, emailEnabled: !next })));
                 }}
               />
               Email me about important updates

@@ -26,6 +26,7 @@ function ClockCard({ shift, onChanged }: { shift: Shift; onChanged: () => void }
   const { run, busy } = useAction();
   const [now, setNow] = useState(() => Date.now());
   const [breakMins, setBreakMins] = useState('0');
+  const [done, setDone] = useState(false); // stops a second click while the page reloads after a successful action
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 30_000);
     return () => clearInterval(t);
@@ -34,11 +35,13 @@ function ClockCard({ shift, onChanged }: { shift: Shift; onChanged: () => void }
   const start = new Date(shift.startTime).getTime();
   const end = new Date(shift.endTime).getTime();
   const sheet = shift.timesheet;
+  // The reload after an action delivers new shift state: that is when the buttons may come back.
+  useEffect(() => setDone(false), [shift.status, shift.workerClockInAt, shift.timesheet?.status]);
   const brk = Number(breakMins);
   const brkErr = !Number.isInteger(brk) || brk < 0 || brk > 480 ? 'Enter whole minutes between 0 and 480' : undefined;
 
-  if (sheet) {
-    return <Card className="p-4 flex items-center justify-between"><span className="text-sm font-semibold">Timesheet</span><StatusBadge status={sheet.status} /></Card>;
+  if (sheet || done) {
+    return <Card className="p-4 flex items-center justify-between"><span className="text-sm font-semibold">Timesheet</span>{sheet ? <StatusBadge status={sheet.status} /> : <span className="text-xs text-slate-500">Updating…</span>}</Card>;
   }
   if (shift.status === 'IN_PROGRESS' && shift.workerClockInAt) {
     const since = new Date(shift.workerClockInAt).getTime();
@@ -51,7 +54,7 @@ function ClockCard({ shift, onChanged }: { shift: Shift; onChanged: () => void }
           <Input type="number" inputMode="numeric" min={0} max={480} className="min-h-[44px] text-base" value={breakMins} onChange={(e) => setBreakMins(e.target.value)} />
         </Field>
         <Button className="w-full min-h-[48px] text-base" loading={busy} disabled={!!brkErr}
-          onClick={async () => { if (await run(() => api.timesheets.clockOut({ shiftId: shift.id, breakMinutes: brk }), 'Clocked out: timesheet submitted')) onChanged(); }}>
+          onClick={async () => { if (await run(() => api.timesheets.clockOut({ shiftId: shift.id, breakMinutes: brk }), 'Clocked out: timesheet submitted')) { setDone(true); onChanged(); } }}>
           Clock out and submit
         </Button>
       </Card>
@@ -65,7 +68,7 @@ function ClockCard({ shift, onChanged }: { shift: Shift; onChanged: () => void }
     if (now <= end) {
       return (
         <Button className="w-full min-h-[52px] text-base" loading={busy}
-          onClick={async () => { if (await run(() => api.timesheets.clockIn(shift.id), 'Clocked in')) onChanged(); }}>
+          onClick={async () => { if (await run(() => api.timesheets.clockIn(shift.id), 'Clocked in')) { setDone(true); onChanged(); } }}>
           <Timer className="w-4 h-4" /> Clock in
         </Button>
       );

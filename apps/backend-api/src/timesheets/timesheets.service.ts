@@ -82,17 +82,27 @@ export class TimesheetsService {
     // Re-submission is only allowed while the timesheet is still open; the status guard is part of
     // the UPDATE so a concurrent approval cannot be overwritten. First submission relies on the
     // unique shiftId (a racing duplicate surfaces as 409).
-    if (existingTs) {
-      const res = await this.prisma.timesheet.updateMany({
-        where: { shiftId: data.shiftId, status: { in: [TimesheetStatus.SUBMITTED, TimesheetStatus.PENDING_SUBMISSION, TimesheetStatus.DISPUTED] } },
-        data: values,
+    await this.prisma.$transaction(async (tx) => {
+      // Lock the shift row and re-check it: a manager cancelling or releasing the shift at the same
+      // moment must not leave an orphan timesheet behind.
+      await tx.$queryRaw`SELECT id FROM "Shift" WHERE id = ${data.shiftId} FOR UPDATE`;
+      const held = await tx.shift.count({
+        where: { id: data.shiftId, assignedWorkerId: data.reliefWorkerId, status: { in: [ShiftStatus.BOOKED, ShiftStatus.IN_PROGRESS] } },
       });
-      if (res.count === 0) throw new ConflictException('Timesheet was already processed');
-    } else {
-      await this.prisma.timesheet.create({
-        data: { shiftId: data.shiftId, reliefWorkerId: data.reliefWorkerId, branchId: shift.branchId, ...values },
-      });
-    }
+      if (held === 0) throw new ConflictException('This shift is no longer assigned to you');
+
+      if (existingTs) {
+        const res = await tx.timesheet.updateMany({
+          where: { shiftId: data.shiftId, status: { in: [TimesheetStatus.SUBMITTED, TimesheetStatus.PENDING_SUBMISSION, TimesheetStatus.DISPUTED] } },
+          data: values,
+        });
+        if (res.count === 0) throw new ConflictException('Timesheet was already processed');
+      } else {
+        await tx.timesheet.create({
+          data: { shiftId: data.shiftId, reliefWorkerId: data.reliefWorkerId, branchId: shift.branchId, ...values },
+        });
+      }
+    });
     await this.notifications.notifyBranchStaff(shift.branchId, {
       type: 'TIMESHEET_SUBMITTED', title: 'Timesheet awaiting approval', body: shift.title, link: '/timesheets',
     });
@@ -129,10 +139,14 @@ export class TimesheetsService {
     if (await this.prisma.timesheet.findUnique({ where: { shiftId: dto.shiftId }, select: { id: true } })) {
       throw new ConflictException('A timesheet has already been submitted for this shift');
     }
+    // Billing starts at the scheduled start (clocking in early is not paid) and a very late clock-out is
+    // capped at the allowed overrun instead of being rejected, so the worker is never left stuck IN_PROGRESS.
+    const clockIn = Math.max(shift.workerClockInAt.getTime(), shift.startTime.getTime());
+    const clockOut = Math.min(Date.now(), shift.endTime.getTime() + LATE_CLOCK_OUT);
     return this.submitTimesheet(reliefWorkerId, {
       shiftId: dto.shiftId,
-      clockInTime: shift.workerClockInAt.toISOString(),
-      clockOutTime: new Date().toISOString(),
+      clockInTime: new Date(clockIn).toISOString(),
+      clockOutTime: new Date(clockOut).toISOString(),
       breakMinutes: dto.breakMinutes,
       notes: dto.notes,
     });

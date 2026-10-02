@@ -1,8 +1,11 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { LeaveStatus, LeaveType, ShiftStatus, ShiftVisibility } from '@prisma/client';
+import { LeaveStatus, LeaveType, Prisma, ShiftStatus, ShiftVisibility } from '@prisma/client';
 import { AccessService, AuthUser } from '../common/access.service';
 import { SubmitLeaveDto } from './dto/leave.dto';
+
+/** Canonical form of a person's name: Unicode-normalised, single spaces, trimmed. */
+const normalizeName = (name: string) => name.normalize('NFKC').replace(/\s+/g, ' ').trim();
 
 /** The instant at which a Europe/London wall-clock time occurs on the given calendar day (handles BST). */
 function londonTime(day: Date, hour: number, minute: number) {
@@ -37,27 +40,42 @@ export class LeaveService {
     const start = new Date(data.startDate);
     const end = new Date(data.endDate);
     if (end < start) throw new BadRequestException('End date must not be before start date');
-    await this.assertNoOverlap(data.branchId, data.staffName, start, end);
-    return this.prisma.leaveRequest.create({
-      data: {
-        branchId: data.branchId,
-        staffName: data.staffName,
-        staffRole: data.staffRole,
-        startDate: new Date(data.startDate),
-        endDate: new Date(data.endDate),
-        leaveType: data.leaveType || LeaveType.ANNUAL,
-        reason: data.reason,
-        status: LeaveStatus.PENDING,
-      },
+    const staffName = normalizeName(data.staffName);
+    if (!staffName) throw new BadRequestException('Staff name is required');
+    // The advisory lock serialises submissions for the same person, so two concurrent requests
+    // cannot both pass the overlap check.
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${data.branchId + ':' + staffName.toLowerCase()}))`;
+      await this.assertNoOverlap(data.branchId, staffName, start, end, undefined, undefined, tx);
+      return tx.leaveRequest.create({
+        data: {
+          branchId: data.branchId,
+          staffName,
+          staffRole: data.staffRole.trim(),
+          startDate: start,
+          endDate: end,
+          leaveType: data.leaveType || LeaveType.ANNUAL,
+          reason: data.reason,
+          status: LeaveStatus.PENDING,
+        },
+      });
     });
   }
 
   /** The same person cannot have two overlapping pending/approved leave requests at a branch. */
-  private async assertNoOverlap(branchId: string, staffName: string, start: Date, end: Date, excludeId?: string, statuses: LeaveStatus[] = [LeaveStatus.PENDING, LeaveStatus.APPROVED]) {
-    const clash = await this.prisma.leaveRequest.findFirst({
+  private async assertNoOverlap(
+    branchId: string,
+    staffName: string,
+    start: Date,
+    end: Date,
+    excludeId?: string,
+    statuses: LeaveStatus[] = [LeaveStatus.PENDING, LeaveStatus.APPROVED],
+    client: Prisma.TransactionClient = this.prisma,
+  ) {
+    const clash = await client.leaveRequest.findFirst({
       where: {
         branchId,
-        staffName: { equals: staffName.trim(), mode: 'insensitive' },
+        staffName: { equals: normalizeName(staffName), mode: 'insensitive' },
         status: { in: statuses },
         startDate: { lte: end },
         endDate: { gte: start },

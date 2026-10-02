@@ -14,7 +14,8 @@ const TRANSITIONS: Partial<Record<ShiftStatus, ShiftStatus[]>> = {
   DRAFT: [ShiftStatus.OPEN, ShiftStatus.CANCELLED],
   OPEN: [ShiftStatus.CANCELLED],
   IN_NEGOTIATION: [ShiftStatus.CANCELLED],
-  BOOKED: [ShiftStatus.IN_PROGRESS, ShiftStatus.OPEN, ShiftStatus.CANCELLED],
+  // IN_PROGRESS is entered only when the worker clocks in.
+  BOOKED: [ShiftStatus.OPEN, ShiftStatus.CANCELLED],
   IN_PROGRESS: [ShiftStatus.CANCELLED],
 };
 
@@ -41,6 +42,7 @@ export class ShiftsService {
     const created = await this.prisma.shift.create({
       data: {
         cascadeStage: cascading ? 1 : 3,
+        cascadeEnabled: cascading,
         nextCascadeAt: cascading ? new Date(Date.now() + CASCADE_DELAY_MINUTES * 60_000) : null,
         branchId: dto.branchId,
         title: dto.title,
@@ -114,7 +116,7 @@ export class ShiftsService {
       data: {
         ...fields,
         // Changing visibility by hand ends any running cascade (staff bank = whole bank, or public).
-        ...(widened ? { cascadeStage: 3, nextCascadeAt: null } : {}),
+        ...(widened ? { cascadeStage: 3, nextCascadeAt: null, cascadeEnabled: false } : {}),
         startTime: start,
         endTime: end,
         hourlyRate: rate,
@@ -146,7 +148,7 @@ export class ShiftsService {
         await tx.timesheet.deleteMany({ where: { shiftId: id, status: 'SUBMITTED' } });
       }
       // A released staff-bank shift picks its cascade timer back up where it left off.
-      if (shift.status === ShiftStatus.BOOKED && dto.status === ShiftStatus.OPEN && shift.visibility === ShiftVisibility.STAFF_BANK_ONLY && shift.cascadeStage < 3) {
+      if (shift.status === ShiftStatus.BOOKED && dto.status === ShiftStatus.OPEN && shift.visibility === ShiftVisibility.STAFF_BANK_ONLY && shift.cascadeEnabled) {
         data.nextCascadeAt = new Date(Date.now() + CASCADE_DELAY_MINUTES * 60_000);
       }
       const res = await tx.shift.updateMany({ where: { id, status: shift.status }, data });

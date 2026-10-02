@@ -762,8 +762,9 @@ describe('automation: cascade, expiry, notifications, checklists, benchmarks', (
     // pretend the clock-in happened 3 hours ago
     await prisma.shift.update({ where: { id: live.id }, data: { workerClockInAt: new Date(Date.now() - 3 * 3_600_000) } });
     const ts = (await post(sarahT, '/timesheets/clock-out', { shiftId: live.id, breakMinutes: 30, notes: 'busy day' }).expect(201)).body;
-    expect(Number(ts.billableHours)).toBeCloseTo(2.5, 1);
-    expect(Number(ts.totalPayout)).toBeCloseTo(100, 0);
+    // clock-in was backdated 3h but the shift only started 2h ago: early time is not billed (2h - 30min break)
+    expect(Number(ts.billableHours)).toBeCloseTo(1.5, 1);
+    expect(Number(ts.totalPayout)).toBeCloseTo(60, 0);
     expect(ts.status).toBe('SUBMITTED');
     await post(sarahT, '/timesheets/clock-out', { shiftId: live.id }).expect(409); // already submitted
 
@@ -784,7 +785,7 @@ describe('automation: cascade, expiry, notifications, checklists, benchmarks', (
     expect(sent).toHaveLength(1);
     expect(sent[0].subject).toBe('You have been booked');
     expect(sent[0].text).toContain(`http://localhost:3001/shifts/${s.id}`); // workers are sent to the worker portal
-    expect(sent[0].text).toContain('Emailed booking');
+    expect(sent[0].text).not.toContain('Emailed booking'); // free text from managers is never put in email bodies
 
     // Managers are linked to the dashboard, not the worker portal
     const neg = await newShift(richmondT, { startTime: at(71, 9), endTime: at(71, 17) }).expect(201);
@@ -810,5 +811,57 @@ describe('automation: cascade, expiry, notifications, checklists, benchmarks', (
     expect(mailsTo('sarah.y@flexrelief.co.uk').length).toBe(count); // no email, but the in-app notification still exists
     expect((await get(sarahT, '/notifications').expect(200)).body.items.some((n: any) => n.type === 'SHIFT_BOOKED' && n.link === `/shifts/${s2.id}`)).toBe(true);
     await patch(sarahT, '/notifications/preferences', { emailEnabled: true }).expect(200);
+  });
+
+  it('caps a very late clock-out instead of leaving the worker stuck IN_PROGRESS', async () => {
+    const end = new Date(Date.now() - 10 * 3_600_000);
+    const start = new Date(end.getTime() - 8 * 3_600_000);
+    const shift = await prisma.shift.create({
+      data: {
+        branchId: richmondId, title: 'Forgot to clock out', startTime: start, endTime: end, hourlyRate: 30, totalEstimatedPay: 240,
+        status: 'IN_PROGRESS', assignedWorkerId: sarahId, workerClockInAt: start, visibility: 'PUBLIC_MARKETPLACE', requiredSystems: [], requiredAccreditations: [],
+      },
+    });
+    const ts = (await post(sarahT, '/timesheets/clock-out', { shiftId: shift.id }).expect(201)).body;
+    // 8h scheduled + the 4h allowed overrun, nothing more
+    expect(Number(ts.billableHours)).toBeCloseTo(12, 1);
+  });
+
+  it('only lets workers move a shift to IN_PROGRESS by clocking in', async () => {
+    const s = (await newShift(richmondT, { startTime: at(75, 9), endTime: at(75, 17) }).expect(201)).body;
+    await patch(richmondT, `/shifts/${s.id}/assign`, { reliefWorkerId: sarahId }).expect(200);
+    await patch(richmondT, `/shifts/${s.id}/status`, { status: 'IN_PROGRESS' }).expect(400);
+  });
+
+  it('turns null on non-nullable fields into a 400, not a 500', async () => {
+    const m = (await post(adminT, '/staff-bank', { reliefWorkerId: davidId }).expect(201)).body;
+    await patch(adminT, `/staff-bank/${m.id}`, { isActive: null }).expect(400);
+    await patch(adminT, `/staff-bank/${m.id}`, { tier: null }).expect(400);
+    await patch(sarahT, '/relief-workers/me/preferences', { systemTags: null }).expect(400);
+    await api().delete(`/staff-bank/${m.id}`).set('Authorization', `Bearer ${adminT}`).expect(200);
+  });
+
+  it('matches leave names after Unicode/whitespace normalisation and serialises concurrent submissions', async () => {
+    const body = (name: string, off = 0) => ({ branchId: richmondId, staffName: name, staffRole: 'Pharmacist', startDate: at(90 + off, 9), endDate: at(92 + off, 17) });
+    const first = (await post(richmondT, '/leave', body('  Zoë   Quinn ')).expect(201)).body;
+    expect(first.staffName).toBe('Zoë Quinn'); // stored normalised
+    await post(richmondT, '/leave', body('ZOË QUINN')).expect(409);
+    await post(richmondT, '/leave', body('Zoe\u0308 Quinn')).expect(409); // decomposed ë
+    // two simultaneous requests for the same person: exactly one wins
+    const results = await Promise.all([1, 2, 3].map(() => post(richmondT, '/leave', body('Race Runner', 10))));
+    expect(results.filter((r) => r.status === 201)).toHaveLength(1);
+    expect(results.filter((r) => r.status === 409)).toHaveLength(2);
+  });
+
+  it('keeps a released stage-3 staff-bank shift cascading, but not one created with cascade:false', async () => {
+    const mk = async (cascade: boolean, day: number) => {
+      const s = (await post(richmondT, '/shifts', { branchId: richmondId, title: `Stage3 ${cascade} ${Date.now()}`, startTime: at(day, 9), endTime: at(day, 17), hourlyRate: 31, visibility: 'STAFF_BANK_ONLY', cascade }).expect(201)).body;
+      if (cascade) await prisma.shift.update({ where: { id: s.id }, data: { cascadeStage: 3 } });
+      await patch(richmondT, `/shifts/${s.id}/assign`, { reliefWorkerId: sarahId }).expect(200);
+      await patch(richmondT, `/shifts/${s.id}/status`, { status: 'OPEN' }).expect(200);
+      return prisma.shift.findUnique({ where: { id: s.id } });
+    };
+    expect((await mk(true, 76)).nextCascadeAt).not.toBeNull();
+    expect((await mk(false, 77)).nextCascadeAt).toBeNull();
   });
 });

@@ -16,3 +16,12 @@ export class PrismaExceptionFilter implements ExceptionFilter {
     res.status(status).json({ statusCode: status, message, error: HttpStatus[status] });
   }
 }
+
+/** A value Prisma rejects as invalid (for example null for a required column) is a client error, not a 500. */
+@Catch(Prisma.PrismaClientValidationError)
+export class PrismaValidationFilter implements ExceptionFilter {
+  catch(_e: Prisma.PrismaClientValidationError, host: ArgumentsHost) {
+    const res = host.switchToHttp().getResponse<Response>();
+    res.status(HttpStatus.BAD_REQUEST).json({ statusCode: 400, message: 'One or more values are invalid', error: 'Bad Request' });
+  }
+}

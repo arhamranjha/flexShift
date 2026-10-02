@@ -104,6 +104,9 @@ export const Select = (p: SelectHTMLAttributes<HTMLSelectElement>) => <select {.
 export const Textarea = (p: TextareaHTMLAttributes<HTMLTextAreaElement>) => <textarea {...p} className={clsx(inputCls, 'min-h-[80px]', p.className)} />;
 
 /* ---------- Modal ---------- */
+/** Open modals, topmost last: Escape and focus trapping only apply to the one on top. */
+const modalStack: symbol[] = [];
+
 export function Modal({
   open, onClose, title, children, footer, wide,
 }: { open: boolean; onClose: () => void; title: string; children: ReactNode; footer?: ReactNode; wide?: boolean }) {
@@ -113,6 +116,8 @@ export function Modal({
 
   useEffect(() => {
     if (!open) return;
+    const me = Symbol('modal');
+    modalStack.push(me);
     const previouslyFocused = document.activeElement as HTMLElement | null;
     const focusables = () =>
       Array.from(panel.current?.querySelectorAll<HTMLElement>('a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])') ?? []);
@@ -121,17 +126,22 @@ export function Modal({
     first?.focus();
 
     const onKey = (e: KeyboardEvent) => {
+      if (modalStack[modalStack.length - 1] !== me) return; // a modal opened on top of this one owns the keyboard
       if (e.key === 'Escape') return onCloseRef.current();
       if (e.key !== 'Tab') return;
       const els = focusables();
       if (!els.length) return;
       const [head, tail] = [els[0], els[els.length - 1]];
-      if (e.shiftKey && document.activeElement === head) { e.preventDefault(); tail.focus(); }
+      const inside = panel.current?.contains(document.activeElement);
+      if (!inside) { e.preventDefault(); head.focus(); } // focus had drifted outside the dialog
+      else if (e.shiftKey && document.activeElement === head) { e.preventDefault(); tail.focus(); }
       else if (!e.shiftKey && document.activeElement === tail) { e.preventDefault(); head.focus(); }
     };
     document.addEventListener('keydown', onKey);
     return () => {
       document.removeEventListener('keydown', onKey);
+      const at = modalStack.indexOf(me);
+      if (at >= 0) modalStack.splice(at, 1);
       previouslyFocused?.focus?.(); // hand focus back to whatever opened the dialog
     };
   }, [open]);

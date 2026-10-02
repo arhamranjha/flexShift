@@ -7,7 +7,7 @@ import { PrismaModule } from './prisma/prisma.module';
 import { CommonModule } from './common/common.module';
 import { StorageModule } from './storage/storage.module';
 import { validateEnv } from './common/env';
-import { PrismaExceptionFilter } from './common/prisma-exception.filter';
+import { PrismaExceptionFilter, PrismaValidationFilter } from './common/prisma-exception.filter';
 import { AuthModule } from './auth/auth.module';
 import { UsersModule } from './users/users.module';
 import { OrganizationsModule } from './organizations/organizations.module';
@@ -49,6 +49,7 @@ import { JobsModule } from './jobs/jobs.module';
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },
     { provide: APP_FILTER, useClass: PrismaExceptionFilter },
+    { provide: APP_FILTER, useClass: PrismaValidationFilter },
   ],
 })
 export class AppModule {}

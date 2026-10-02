@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { createTransport, type Transporter } from 'nodemailer';
+import type SMTPPool from 'nodemailer/lib/smtp-pool';
 
 export interface MailMessage {
   to: string;
@@ -28,7 +29,15 @@ export class MailerService {
       if (!process.env.SMTP_URL) {
         this.log.error('EMAIL_DRIVER=smtp needs SMTP_URL; email is disabled');
       } else {
-        this.transport = createTransport(process.env.SMTP_URL);
+        // Pooled with explicit timeouts so a slow or dead SMTP server cannot pile up sockets or hang for minutes.
+        this.transport = createTransport({
+          url: process.env.SMTP_URL,
+          pool: true,
+          maxConnections: 5,
+          connectionTimeout: 10_000,
+          greetingTimeout: 10_000,
+          socketTimeout: 20_000,
+        } as SMTPPool.Options);
       }
     } else if (this.driver === 'json') {
       this.transport = createTransport({ jsonTransport: true });

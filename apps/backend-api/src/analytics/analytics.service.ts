@@ -94,12 +94,13 @@ export class AnalyticsService {
     const rates = rows.map((r) => Number(r.hourlyRate)).sort((a, b) => a - b);
     // Percentiles of tiny samples are just individual rates, so require several shifts from several organizations.
     const orgs = new Set(rows.map((r) => r.branch.organizationId));
-    if (rates.length < 5 || orgs.size < 3) return { profession, sampleSize: rates.length, p25: null, median: null, p75: null, average: null };
+    if (rates.length < 5 || orgs.size < 3) return { profession, sampleSize: 0, insufficientData: true, p25: null, median: null, p75: null, average: null };
     const at = (q: number) => rates[Math.min(rates.length - 1, Math.floor(q * (rates.length - 1) + 0.5))];
     const round = (n: number) => Number(n.toFixed(2));
     return {
       profession,
       sampleSize: rates.length,
+      insufficientData: false,
       p25: round(at(0.25)),
       median: round(at(0.5)),
       p75: round(at(0.75)),

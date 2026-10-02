@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { Role, ShiftVisibility } from '@prisma/client';
+import { Prisma, Role, ShiftVisibility } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { MailerService } from './mailer.service';
 
@@ -21,6 +21,9 @@ const EMAILED_TYPES = new Set([
   'DOCUMENT_VERIFIED', 'DOCUMENT_REJECTED', 'DOCUMENT_EXPIRING', 'DOCUMENT_EXPIRED',
   'EMERGENCY_SHIFT', 'WORKER_COMPLIANCE_LAPSED',
 ]);
+
+/** Types whose body contains text typed by a manager or a worker: emailed with a link only, never the text. */
+const FREE_TEXT_TYPES = new Set(['EMERGENCY_SHIFT', 'SHIFT_BOOKED', 'WORKER_COMPLIANCE_LAPSED', 'DOCUMENT_REJECTED', 'NEGOTIATION_PROPOSED']);
 
 const trimSlash = (u: string) => u.replace(/\/+$/, '');
 
@@ -46,7 +49,11 @@ export class NotificationsService {
       this.log.warn(`notify failed: ${(e as Error).message}`);
       return;
     }
-    await this.email(ids, n);
+    // Real SMTP delivery can be slow, so it must not hold up the request that triggered it.
+    // The json driver (tests) is instant and awaited so outcomes are deterministic.
+    const sending = this.email(ids, n);
+    if (this.mailer.driver === 'json') await sending;
+    else void sending;
   }
 
   /** Mirrors important notifications to email for users who have not opted out. */
@@ -62,7 +69,7 @@ export class NotificationsService {
       await Promise.all(
         users.map((u) => {
           const base = u.role === Role.RELIEF_WORKER ? workerUrl : adminUrl;
-          const lines = [n.body, n.link ? `Open: ${base}${n.link}` : '', '', 'You can turn these emails off from the bell menu in FlexShift.'];
+          const lines = [FREE_TEXT_TYPES.has(n.type) ? 'Open FlexShift for the details.' : n.body, n.link ? `Open: ${base}${n.link}` : '', '', 'You can turn these emails off from the bell menu in FlexShift.'];
           return this.mailer.send({ to: u.email, subject: n.title, text: lines.filter((l) => l !== undefined && l !== null).join('\n').trim() });
         }),
       );
@@ -87,6 +94,26 @@ export class NotificationsService {
     await this.notifyUsers([...admins.map((a) => a.id), ...(branch.managerId ? [branch.managerId] : [])], n);
   }
 
+  /** Pages through every matching worker in a stable order (capped at 5000 so one shift cannot fan out forever). */
+  private async workerUserIds(where: Prisma.ReliefProfileWhereInput) {
+    const ids: string[] = [];
+    let cursor: string | undefined;
+    while (ids.length < 5000) {
+      const page = await this.prisma.reliefProfile.findMany({
+        where,
+        select: { id: true, userId: true },
+        orderBy: { id: 'asc' },
+        take: 500,
+        ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}),
+      });
+      if (!page.length) break;
+      ids.push(...page.map((w) => w.userId));
+      cursor = page[page.length - 1].id;
+      if (page.length < 500) break;
+    }
+    return ids;
+  }
+
   /** Staff-bank members whose tier has just been released to this shift. */
   async notifyTierMembers(shift: { id: string; title: string; branchId: string; hourlyRate: unknown }, stage: number) {
     const branch = await this.prisma.facilityBranch.findUnique({ where: { id: shift.branchId }, select: { organizationId: true } });
@@ -107,17 +134,13 @@ export class NotificationsService {
   /** Verified workers of the right profession whose minimum rate threshold this shift meets. */
   async notifyRateMatches(shift: { id: string; title: string; roleRequired: string; hourlyRate: unknown; visibility: ShiftVisibility }) {
     if (shift.visibility === ShiftVisibility.STAFF_BANK_ONLY) return;
-    const workers = await this.prisma.reliefProfile.findMany({
-      where: {
-        isVerified: true,
-        profession: shift.roleRequired,
-        minimumShiftRate: { not: null, lte: Number(shift.hourlyRate) },
-        user: { isActive: true },
-      },
-      select: { userId: true },
-      take: 500,
+    const userIds = await this.workerUserIds({
+      isVerified: true,
+      profession: shift.roleRequired,
+      minimumShiftRate: { not: null, lte: Number(shift.hourlyRate) },
+      user: { isActive: true },
     });
-    await this.notifyUsers(workers.map((w) => w.userId), {
+    await this.notifyUsers(userIds, {
       type: 'SHIFT_MATCH',
       title: 'A shift meets your minimum rate',
       body: `${shift.title} at £${Number(shift.hourlyRate).toFixed(2)}/h`,
@@ -130,12 +153,8 @@ export class NotificationsService {
    * profession is told straight away.
    */
   async notifyEmergency(shift: { id: string; title: string; roleRequired: string; hourlyRate: unknown }) {
-    const workers = await this.prisma.reliefProfile.findMany({
-      where: { isVerified: true, profession: shift.roleRequired, user: { isActive: true } },
-      select: { userId: true },
-      take: 500,
-    });
-    await this.notifyUsers(workers.map((w) => w.userId), {
+    const userIds = await this.workerUserIds({ isVerified: true, profession: shift.roleRequired, user: { isActive: true } });
+    await this.notifyUsers(userIds, {
       type: 'EMERGENCY_SHIFT',
       title: 'Emergency shift needs cover',
       body: `${shift.title} at £${Number(shift.hourlyRate).toFixed(2)}/h`,

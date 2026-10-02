@@ -271,6 +271,8 @@ export interface NotificationFeed {
 export interface MarketRates {
   profession: string;
   sampleSize: number;
+  /** True when too few shifts/organizations exist to publish a benchmark. */
+  insufficientData?: boolean;
   p25: number | null;
   median: number | null;
   p75: number | null;
