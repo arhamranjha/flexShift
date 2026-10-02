@@ -1,0 +1,14 @@
+node_modules/
+dist/
+build/
+.next/
+out/
+*.log
+.env
+.env.local
+.env.*.local
+.DS_Store
+.idea/
+*.mp4
+*.m4v
+coverage/

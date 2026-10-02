@@ -1,0 +1,14 @@
+{
+  "name": "flexshift-workspace",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev:backend": "pnpm --filter backend-api start:dev",
+    "build:backend": "pnpm --filter backend-api build",
+    "prisma:generate": "pnpm --filter backend-api prisma:generate",
+    "prisma:migrate": "pnpm --filter backend-api prisma:migrate"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.5"
+  }
+}

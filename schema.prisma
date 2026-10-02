@@ -1,0 +1,380 @@
+// FlexShift Prisma Database Schema
+// Clean-room enterprise workforce management & shift fulfillment architecture
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  SUPER_ADMIN
+  ORG_ADMIN
+  FACILITY_MANAGER
+  RELIEF_WORKER
+}
+
+enum DocType {
+  IDENTITY
+  RIGHT_TO_WORK
+  DBS_POLICE_CHECK
+  INDEMNITY_INSURANCE
+  SAFEGUARDING_L3
+  PRACTICE_DECLARATION
+  MANDATORY_TRAINING
+  OTHER
+}
+
+enum DocStatus {
+  PENDING
+  VERIFIED
+  EXPIRED
+  REJECTED
+}
+
+enum ShiftStatus {
+  DRAFT
+  OPEN
+  IN_NEGOTIATION
+  BOOKED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+enum ShiftVisibility {
+  STAFF_BANK_ONLY
+  PUBLIC_MARKETPLACE
+  EMERGENCY_BROADCAST
+}
+
+enum ApplicationStatus {
+  APPLIED
+  UNDER_REVIEW
+  ACCEPTED
+  REJECTED
+  WITHDRAWN
+}
+
+enum NegotiationStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+  COUNTERED
+}
+
+enum TimesheetStatus {
+  PENDING_SUBMISSION
+  SUBMITTED
+  APPROVED
+  DISPUTED
+  SETTLED
+}
+
+enum InvoiceStatus {
+  DRAFT
+  ISSUED
+  PAID
+  CANCELLED
+}
+
+enum LeaveStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
+}
+
+enum LeaveType {
+  ANNUAL
+  SICK
+  EMERGENCY
+  STUDY
+  UNPAID
+}
+
+enum StaffBankTier {
+  TIER_1_PREFERRED
+  TIER_2_REGULAR
+  TIER_3_RESERVE
+}
+
+model Organization {
+  id               String            @id @default(uuid())
+  name             String
+  slug             String            @unique
+  code             String            @unique
+  logoUrl          String?
+  subscriptionTier String            @default("ENTERPRISE")
+  billingEmail     String
+  phone            String
+  isActive         Boolean           @default(true)
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+
+  branches         FacilityBranch[]
+  staffBankMembers StaffBankMember[]
+  invoices         Invoice[]
+  users            User[]
+}
+
+model FacilityBranch {
+  id              String            @id @default(uuid())
+  organizationId  String
+  organization    Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  name            String
+  branchCode      String            @unique
+  addressLine1    String
+  addressLine2    String?
+  city            String
+  postcode        String
+  country         String            @default("UK")
+  phone           String
+  email           String?
+  managerId       String?           @unique
+  manager         User?             @relation("BranchManager", fields: [managerId], references: [id])
+  isActive        Boolean           @default(true)
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  shifts          Shift[]
+  staffBankMembers StaffBankMember[]
+  timesheets      Timesheet[]
+  leaveRequests   LeaveRequest[]
+  favouritedBy    WorkerFavouriteBranch[]
+}
+
+model User {
+  id             String                @id @default(uuid())
+  organizationId String?
+  organization   Organization?         @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+  email          String                @unique
+  passwordHash   String
+  role           Role
+  isActive       Boolean               @default(true)
+  lastLoginAt    DateTime?
+  createdAt      DateTime              @default(now())
+  updatedAt      DateTime              @updatedAt
+
+  reliefProfile  ReliefProfile?
+  managedBranch  FacilityBranch?       @relation("BranchManager")
+  verifiedDocs   ComplianceDocument[]  @relation("DocumentVerifier")
+  approvedTimesheets Timesheet[]       @relation("TimesheetApprover")
+  reviewedLeaves LeaveRequest[]        @relation("LeaveReviewer")
+}
+
+model ReliefProfile {
+  id                       String                  @id @default(uuid())
+  userId                   String                  @unique
+  user                     User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  firstName                String
+  lastName                 String
+  phone                    String
+  registrationNumber       String                  @unique // e.g. GPhC or professional body number
+  profession               String                  @default("Pharmacist") // Pharmacist, Pharmacy Dispenser, Optometrist, etc.
+  hourlyRate               Decimal?                @db.Decimal(10, 2)
+  minimumShiftRate         Decimal?                @db.Decimal(10, 2)
+  bio                      String?
+  yearsCommunityExperience Int                     @default(0)
+  yearsHospitalExperience  Int                     @default(0)
+  university               String?
+  graduationYear           Int?
+  skilledWorkerVisa        Boolean                 @default(false)
+  systemTags               String[]                // e.g. ["ProScript", "Columbus", "Nexphase"]
+  accreditations           String[]                // e.g. ["CPCS", "Flu Vaccination", "Safeguarding L3", "NMS"]
+  isVerified               Boolean                 @default(false)
+  createdAt                DateTime                @default(now())
+  updatedAt                DateTime                @updatedAt
+
+  documents                ComplianceDocument[]
+  assignedShifts           Shift[]                 @relation("AssignedReliefWorker")
+  applications             ShiftApplication[]
+  negotiations             ShiftNegotiation[]
+  timesheets               Timesheet[]
+  invoices                 Invoice[]
+  staffBankMemberships     StaffBankMember[]
+  watchedShifts            WorkerWatchedShift[]
+  favouriteBranches        WorkerFavouriteBranch[]
+}
+
+model ComplianceDocument {
+  id                String         @id @default(uuid())
+  reliefWorkerId    String
+  reliefWorker      ReliefProfile  @relation(fields: [reliefWorkerId], references: [id], onDelete: Cascade)
+  type              DocType
+  documentReference String?
+  fileUrl           String
+  issueDate         DateTime?
+  expiresAt         DateTime?
+  status            DocStatus      @default(PENDING)
+  verifiedAt        DateTime?
+  verifiedById      String?
+  verifiedBy        User?          @relation("DocumentVerifier", fields: [verifiedById], references: [id])
+  verificationNotes String?
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+}
+
+model StaffBankMember {
+  id                String         @id @default(uuid())
+  organizationId    String
+  organization      Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  branchId          String?
+  branch            FacilityBranch? @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  reliefWorkerId    String
+  reliefWorker      ReliefProfile  @relation(fields: [reliefWorkerId], references: [id], onDelete: Cascade)
+  tier              StaffBankTier  @default(TIER_2_REGULAR)
+  customHourlyRate  Decimal?       @db.Decimal(10, 2)
+  isActive          Boolean        @default(true)
+  joinedAt          DateTime       @default(now())
+  notes             String?
+
+  @@unique([organizationId, reliefWorkerId])
+}
+
+model Shift {
+  id                    String              @id @default(uuid())
+  branchId              String
+  branch                FacilityBranch      @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  title                 String
+  roleRequired          String              @default("Pharmacist")
+  startTime             DateTime
+  endTime               DateTime
+  hourlyRate            Decimal             @db.Decimal(10, 2)
+  totalEstimatedPay     Decimal             @db.Decimal(10, 2)
+  requiredSystems       String[]            // e.g. ["ProScript", "Columbus"]
+  requiredAccreditations String[]           // e.g. ["CPCS", "Flu"]
+  visibility            ShiftVisibility     @default(STAFF_BANK_ONLY)
+  status                ShiftStatus         @default(OPEN)
+  instantBookEnabled    Boolean             @default(false)
+  isOvernight           Boolean             @default(false)
+  isEmergency           Boolean             @default(false)
+  notes                 String?
+  assignedWorkerId      String?
+  assignedWorker        ReliefProfile?      @relation("AssignedReliefWorker", fields: [assignedWorkerId], references: [id], onDelete: SetNull)
+  createdAt             DateTime            @default(now())
+  updatedAt             DateTime            @updatedAt
+
+  applications          ShiftApplication[]
+  negotiations          ShiftNegotiation[]
+  timesheet             Timesheet?
+  watchedBy             WorkerWatchedShift[]
+}
+
+model ShiftApplication {
+  id             String            @id @default(uuid())
+  shiftId        String
+  shift          Shift             @relation(fields: [shiftId], references: [id], onDelete: Cascade)
+  reliefWorkerId String
+  reliefWorker   ReliefProfile     @relation(fields: [reliefWorkerId], references: [id], onDelete: Cascade)
+  status         ApplicationStatus @default(APPLIED)
+  appliedAt      DateTime          @default(now())
+  reviewedAt     DateTime?
+  notes          String?
+
+  @@unique([shiftId, reliefWorkerId])
+}
+
+model ShiftNegotiation {
+  id                 String            @id @default(uuid())
+  shiftId            String
+  shift              Shift             @relation(fields: [shiftId], references: [id], onDelete: Cascade)
+  reliefWorkerId     String
+  reliefWorker       ReliefProfile     @relation(fields: [reliefWorkerId], references: [id], onDelete: Cascade)
+  proposedHourlyRate Decimal           @db.Decimal(10, 2)
+  proposedStartTime  DateTime?
+  proposedEndTime    DateTime?
+  message            String?
+  counterOfferRate   Decimal?          @db.Decimal(10, 2)
+  status             NegotiationStatus @default(PENDING)
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
+}
+
+model Timesheet {
+  id                 String          @id @default(uuid())
+  shiftId            String          @unique
+  shift              Shift           @relation(fields: [shiftId], references: [id], onDelete: Cascade)
+  reliefWorkerId     String
+  reliefWorker       ReliefProfile   @relation(fields: [reliefWorkerId], references: [id], onDelete: Cascade)
+  branchId           String
+  branch             FacilityBranch  @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  clockInTime        DateTime
+  clockOutTime       DateTime
+  breakMinutes       Int             @default(0)
+  billableHours      Decimal         @db.Decimal(5, 2)
+  hourlyRateApplied  Decimal         @db.Decimal(10, 2)
+  totalPayout        Decimal         @db.Decimal(10, 2)
+  notes              String?
+  status             TimesheetStatus @default(SUBMITTED)
+  submittedAt        DateTime        @default(now())
+  approvedAt         DateTime?
+  approvedById       String?
+  approvedBy         User?           @relation("TimesheetApprover", fields: [approvedById], references: [id])
+
+  invoice            Invoice?
+}
+
+model Invoice {
+  id                 String        @id @default(uuid())
+  invoiceNumber      String        @unique
+  organizationId     String
+  organization       Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  reliefWorkerId     String
+  reliefWorker       ReliefProfile @relation(fields: [reliefWorkerId], references: [id], onDelete: Cascade)
+  timesheetId        String?       @unique
+  timesheet          Timesheet?    @relation(fields: [timesheetId], references: [id], onDelete: SetNull)
+  totalAmount        Decimal       @db.Decimal(10, 2)
+  currency           String        @default("GBP")
+  status             InvoiceStatus @default(DRAFT)
+  issuedAt           DateTime      @default(now())
+  dueAt              DateTime?
+  paidAt             DateTime?
+  paymentReference   String?
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+}
+
+model LeaveRequest {
+  id                        String         @id @default(uuid())
+  branchId                  String
+  branch                    FacilityBranch @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  staffName                 String
+  staffRole                 String
+  startDate                 DateTime
+  endDate                   DateTime
+  leaveType                 LeaveType      @default(ANNUAL)
+  status                    LeaveStatus    @default(PENDING)
+  reason                    String?
+  autoShiftVacanciesCreated Boolean        @default(false)
+  reviewedById              String?
+  reviewedBy                User?          @relation("LeaveReviewer", fields: [reviewedById], references: [id])
+  reviewedAt                DateTime?
+  createdAt                 DateTime       @default(now())
+  updatedAt                 DateTime       @updatedAt
+}
+
+model WorkerWatchedShift {
+  id             String        @id @default(uuid())
+  reliefWorkerId String
+  reliefWorker   ReliefProfile @relation(fields: [reliefWorkerId], references: [id], onDelete: Cascade)
+  shiftId        String
+  shift          Shift         @relation(fields: [shiftId], references: [id], onDelete: Cascade)
+  createdAt      DateTime      @default(now())
+
+  @@unique([reliefWorkerId, shiftId])
+}
+
+model WorkerFavouriteBranch {
+  id             String         @id @default(uuid())
+  reliefWorkerId String
+  reliefWorker   ReliefProfile  @relation(fields: [reliefWorkerId], references: [id], onDelete: Cascade)
+  branchId       String
+  branch         FacilityBranch @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  createdAt      DateTime       @default(now())
+
+  @@unique([reliefWorkerId, branchId])
+}
