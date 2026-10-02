@@ -5,6 +5,7 @@ import { AppModule } from '../src/app.module';
 import { configureApp } from '../src/bootstrap';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { JobsService } from '../src/jobs/jobs.service';
+import { MailerService } from '../src/notifications/mailer.service';
 
 const PW = 'FlexShiftPass2026!';
 const DAY = 86_400_000;
@@ -770,5 +771,44 @@ describe('automation: cascade, expiry, notifications, checklists, benchmarks', (
     const approved = (await patch(richmondT, `/timesheets/${ts.id}/approve`).expect(200)).body;
     expect(approved.invoice.invoiceNumber).toMatch(/^INV-/);
     expect((await prisma.shift.findUnique({ where: { id: live.id } })).status).toBe('COMPLETED');
+  });
+
+  it('emails important notifications, respects opt-out and links to the right app', async () => {
+    const mailer = app.get(MailerService);
+    const mailsTo = (email: string) => mailer.outbox.filter((m) => m.to === email);
+    const before = mailsTo('sarah.y@flexrelief.co.uk').length;
+
+    const s = (await newShift(richmondT, { startTime: at(70, 9), endTime: at(70, 17), title: 'Emailed booking' }).expect(201)).body;
+    await patch(richmondT, `/shifts/${s.id}/assign`, { reliefWorkerId: sarahId }).expect(200);
+    const sent = mailsTo('sarah.y@flexrelief.co.uk').slice(before);
+    expect(sent).toHaveLength(1);
+    expect(sent[0].subject).toBe('You have been booked');
+    expect(sent[0].text).toContain(`http://localhost:3001/shifts/${s.id}`); // workers are sent to the worker portal
+    expect(sent[0].text).toContain('Emailed booking');
+
+    // Managers are linked to the dashboard, not the worker portal
+    const neg = await newShift(richmondT, { startTime: at(71, 9), endTime: at(71, 17) }).expect(201);
+    await post(davidT, '/negotiations', { shiftId: neg.body.id, proposedHourlyRate: 45 }).expect(201);
+    const mgrMail = mailsTo('richmond.mgr@apexhealth.co.uk').find((m) => m.subject === 'New rate proposal');
+    expect(mgrMail).toBeTruthy();
+    expect(mgrMail!.text).toContain('http://localhost:3000/negotiations');
+
+    // High-volume types stay in-app only: a tier release creates a notification but no email
+    const total = mailer.outbox.length;
+    await post(richmondT, '/shifts', { branchId: richmondId, title: 'Quiet release', startTime: at(72, 9), endTime: at(72, 17), hourlyRate: 31, visibility: 'STAFF_BANK_ONLY' }).expect(201);
+    expect(mailer.outbox.length).toBe(total);
+    expect((await get(sarahT, '/notifications').expect(200)).body.items.some((n: any) => n.type === 'NEW_SHIFT')).toBe(true);
+
+    // Opt-out
+    expect((await get(sarahT, '/notifications').expect(200)).body.emailEnabled).toBe(true);
+    await patch(sarahT, '/notifications/preferences', { emailEnabled: 'yes' }).expect(400);
+    await patch(sarahT, '/notifications/preferences', { emailEnabled: false }).expect(200);
+    expect((await get(sarahT, '/notifications').expect(200)).body.emailEnabled).toBe(false);
+    const s2 = (await newShift(richmondT, { startTime: at(73, 9), endTime: at(73, 17) }).expect(201)).body;
+    const count = mailsTo('sarah.y@flexrelief.co.uk').length;
+    await patch(richmondT, `/shifts/${s2.id}/assign`, { reliefWorkerId: sarahId }).expect(200);
+    expect(mailsTo('sarah.y@flexrelief.co.uk').length).toBe(count); // no email, but the in-app notification still exists
+    expect((await get(sarahT, '/notifications').expect(200)).body.items.some((n: any) => n.type === 'SHIFT_BOOKED' && n.link === `/shifts/${s2.id}`)).toBe(true);
+    await patch(sarahT, '/notifications/preferences', { emailEnabled: true }).expect(200);
   });
 });

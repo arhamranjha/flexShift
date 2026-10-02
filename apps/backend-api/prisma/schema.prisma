@@ -158,6 +158,7 @@ model User {
   role           Role
   isActive       Boolean               @default(true)
   mustChangePassword Boolean           @default(false)
+  emailNotifications Boolean           @default(true)
   tokenVersion   Int                   @default(0)
   lastLoginAt    DateTime?
   createdAt      DateTime              @default(now())

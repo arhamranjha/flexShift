@@ -10,7 +10,7 @@ const POLL_MS = 30_000;
 
 export function NotificationBell() {
   const router = useRouter();
-  const [feed, setFeed] = useState<NotificationFeed>({ unread: 0, items: [] });
+  const [feed, setFeed] = useState<NotificationFeed>({ unread: 0, items: [], emailEnabled: null });
   const [open, setOpen] = useState(false);
   const box = useRef<HTMLDivElement>(null);
 
@@ -72,6 +72,21 @@ export function NotificationBell() {
               </li>
             ))}
           </ul>
+          {feed.emailEnabled !== null && (
+            <label className="flex items-center gap-2 px-4 py-2.5 border-t border-slate-100 text-xs text-slate-600">
+              <input
+                type="checkbox"
+                className="rounded border-slate-300 text-emerald-600"
+                checked={feed.emailEnabled}
+                onChange={(e) => {
+                  const next = e.target.checked;
+                  setFeed((f) => ({ ...f, emailEnabled: next }));
+                  api.notifications.setEmailEnabled(next).catch(load);
+                }}
+              />
+              Email me about important updates
+            </label>
+          )}
         </div>
       )}
     </div>

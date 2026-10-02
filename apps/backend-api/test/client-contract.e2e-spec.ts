@@ -221,6 +221,10 @@ describe('api-client against the live API', () => {
     expect((await admin.api.users.list()).length).toBeGreaterThan(0);
     const feed = await mgr.api.notifications.list();
     expect(feed.items.length).toBeGreaterThan(0);
+    expect(typeof feed.emailEnabled).toBe('boolean');
+    expect((await mgr.api.notifications.setEmailEnabled(false)).emailEnabled).toBe(false);
+    expect((await mgr.api.notifications.list()).emailEnabled).toBe(false);
+    await mgr.api.notifications.setEmailEnabled(true);
     await mgr.api.notifications.markAllRead();
     expect((await mgr.api.notifications.list()).unread).toBe(0);
     await david.api.auth.logout();

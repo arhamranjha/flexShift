@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Role, ShiftVisibility } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { MailerService } from './mailer.service';
 
 export interface NotificationInput {
   type: string;
@@ -13,6 +14,16 @@ export interface NotificationInput {
 /** Tier rank used by the shift cascade: Tier 1 sees a shift first, Tier 3 last. */
 export const TIER_RANK = { TIER_1_PREFERRED: 1, TIER_2_REGULAR: 2, TIER_3_RESERVE: 3 } as const;
 
+/** Notification types worth an email. High-volume ones (new-shift alerts, clock-ins, queue items) stay in-app only. */
+const EMAILED_TYPES = new Set([
+  'NEGOTIATION_PROPOSED', 'NEGOTIATION_COUNTERED', 'NEGOTIATION_ACCEPTED', 'NEGOTIATION_REJECTED',
+  'SHIFT_BOOKED', 'TIMESHEET_APPROVED', 'INVOICE_PAID',
+  'DOCUMENT_VERIFIED', 'DOCUMENT_REJECTED', 'DOCUMENT_EXPIRING', 'DOCUMENT_EXPIRED',
+  'EMERGENCY_SHIFT', 'WORKER_COMPLIANCE_LAPSED',
+]);
+
+const trimSlash = (u: string) => u.replace(/\/+$/, '');
+
 /**
  * In-app notifications. Sending is best-effort: a failure here must never break the business
  * action that triggered it. (Email delivery can be layered on by mirroring `notifyUsers`.)
@@ -21,7 +32,10 @@ export const TIER_RANK = { TIER_1_PREFERRED: 1, TIER_2_REGULAR: 2, TIER_3_RESERV
 export class NotificationsService {
   private log = new Logger(NotificationsService.name);
 
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private mailer: MailerService,
+  ) {}
 
   async notifyUsers(userIds: string[], n: NotificationInput) {
     const ids = [...new Set(userIds)];
@@ -30,6 +44,30 @@ export class NotificationsService {
       await this.prisma.notification.createMany({ data: ids.map((userId) => ({ userId, ...n })) });
     } catch (e) {
       this.log.warn(`notify failed: ${(e as Error).message}`);
+      return;
+    }
+    await this.email(ids, n);
+  }
+
+  /** Mirrors important notifications to email for users who have not opted out. */
+  private async email(userIds: string[], n: NotificationInput) {
+    if (!this.mailer.enabled || !EMAILED_TYPES.has(n.type)) return;
+    try {
+      const users = await this.prisma.user.findMany({
+        where: { id: { in: userIds }, isActive: true, emailNotifications: true },
+        select: { email: true, role: true },
+      });
+      const adminUrl = trimSlash(process.env.ADMIN_APP_URL || 'http://localhost:3000');
+      const workerUrl = trimSlash(process.env.WORKER_APP_URL || 'http://localhost:3001');
+      await Promise.all(
+        users.map((u) => {
+          const base = u.role === Role.RELIEF_WORKER ? workerUrl : adminUrl;
+          const lines = [n.body, n.link ? `Open: ${base}${n.link}` : '', '', 'You can turn these emails off from the bell menu in FlexShift.'];
+          return this.mailer.send({ to: u.email, subject: n.title, text: lines.filter((l) => l !== undefined && l !== null).join('\n').trim() });
+        }),
+      );
+    } catch (e) {
+      this.log.warn(`email fan-out failed: ${(e as Error).message}`);
     }
   }
 
@@ -109,7 +147,17 @@ export class NotificationsService {
     return Promise.all([
       this.prisma.notification.findMany({ where: { userId }, orderBy: { createdAt: 'desc' }, take: 50 }),
       this.prisma.notification.count({ where: { userId, readAt: null } }),
-    ]).then(([items, unread]) => ({ unread, items }));
+      this.prisma.user.findUnique({ where: { id: userId }, select: { emailNotifications: true } }),
+    ]).then(([items, unread, prefs]) => ({
+      unread,
+      items,
+      emailEnabled: this.mailer.enabled ? (prefs?.emailNotifications ?? true) : null, // null: email is not configured
+    }));
+  }
+
+  async setEmailPreference(userId: string, emailEnabled: boolean) {
+    await this.prisma.user.update({ where: { id: userId }, data: { emailNotifications: emailEnabled } });
+    return { emailEnabled };
   }
 
   async markRead(userId: string, id: string) {

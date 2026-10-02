@@ -264,6 +264,8 @@ export interface AppNotification {
 export interface NotificationFeed {
   unread: number;
   items: AppNotification[];
+  /** Whether email copies are on for this user; null when the server has no email configured. */
+  emailEnabled: boolean | null;
 }
 
 export interface MarketRates {

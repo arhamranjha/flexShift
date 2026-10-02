@@ -16,7 +16,7 @@ Legend: [x] done · [~] partly done · [ ] not started
 - [x] Migrations committed; seed is idempotent and date-relative
 - [x] 59 jest e2e tests incl. a contract test of the shared API client; CI config
 - [ ] S3 storage adapter (interface exists; local disk only)
-- [ ] Email delivery for notifications (in-app only)
+- [x] Email delivery for important notifications (SMTP via nodemailer, off by default; per-user opt-out in the bell menu; drivers off/smtp/json)
 - [ ] Real BACS file: needs worker bank details (CSV payment batch exists, no sort code/account no.)
 - [ ] Accounting-software export
 - [ ] HTTP-only cookie auth (spec) — both apps use bearer tokens in localStorage
@@ -42,7 +42,7 @@ Legend: [x] done · [~] partly done · [ ] not started
 - [x] Notification bell
 - [x] Live clock-in/out on the shift page (clock-in opens 1h before start; clock-out submits the timesheet)
 - [x] Clearing the minimum-rate threshold / standard rate
-- [ ] Push / email notifications; installable PWA
+- [ ] Push notifications; installable PWA
 
 ## Infrastructure
 - [x] Dockerfiles (api, web-admin, worker-portal; built and API boot-tested), compose `--profile app`, `.gitlab-ci.yml`

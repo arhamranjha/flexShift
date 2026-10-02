@@ -6,5 +6,6 @@ process.env.DATABASE_URL = TEST_DATABASE_URL;
 process.env.JWT_SECRET = 'test-secret-test-secret-test-secret';
 process.env.THROTTLE_LIMIT = '100000';
 process.env.AUTH_THROTTLE_LIMIT = '100000';
+process.env.EMAIL_DRIVER = 'json'; // builds messages in memory; nothing is ever sent
 process.env.DISABLE_CRON = 'true'; // tests call JobsService.run*() directly; a live timer would race with them
 process.env.UPLOAD_DIR = '/tmp/flexshift-test-uploads';

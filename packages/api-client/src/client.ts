@@ -68,6 +68,7 @@ export function createApiClient(opts: ClientOptions) {
       list: () => get<T.NotificationFeed>('/notifications'),
       markRead: (id: string) => send<{ success: boolean }>('POST', `/notifications/${id}/read`),
       markAllRead: () => send<{ success: boolean }>('POST', '/notifications/read-all'),
+      setEmailEnabled: (emailEnabled: boolean) => send<{ emailEnabled: boolean }>('PATCH', '/notifications/preferences', { emailEnabled }),
     },
     organizations: {
       list: () => get<T.Organization[]>('/organizations'),
