@@ -105,6 +105,8 @@ export interface Shift {
   /** Staff-bank cascade: 1 = Tier 1 only, 2 = Tiers 1-2, 3 = whole bank. */
   cascadeStage?: number;
   nextCascadeAt?: string | null;
+  /** Set while the assigned worker is clocked in. */
+  workerClockInAt?: string | null;
 }
 
 export interface ShiftApplication {

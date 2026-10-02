@@ -91,7 +91,7 @@ JWT_SECRET=$(openssl rand -base64 48) docker compose --profile app up --build
 * **Tenancy:** organization → facility branch. Org admins see all their branches, branch managers only their own; every query goes through `AccessService` (`apps/backend-api/src/common/access.service.ts`). Other tenants' ids return 404/403.
 * **Compliance gating:** a worker can only be booked with verified, unexpired Identity, Right to Work, DBS and Indemnity documents (plus anything the organization adds under Settings) and the shift's required systems/accreditations. One rule, `shifts/eligibility.ts`, covers instant book, apply, negotiate and manager assignment.
 * **Tiered cascade:** staff-bank shifts go to Tier 1 first, then Tier 2, Tier 3 and finally the open marketplace, one step per `CASCADE_DELAY_MINUTES` (a cron job).
-* **Money flow:** shift → (apply / negotiate / instant book / assign) → timesheet → manager approval → invoice → org admin marks paid (CSV payment batch export available).
+* **Money flow:** shift → (apply / negotiate / instant book / assign) → clock in/out or manual timesheet → manager approval → invoice → org admin marks paid (CSV payment batch export available).
 * **Notifications:** in-app (bell icon) for proposals, counters, bookings, timesheets, invoices, document reviews, expiry warnings (30 and 7 days) and new-shift releases.
 
 ## 5. API surface

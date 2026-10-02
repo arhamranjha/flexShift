@@ -40,7 +40,7 @@ Legend: [x] done · [~] partly done · [ ] not started
 - [x] Register (2-step) / login, feed (For you, Watching, Favourites, Emergencies, filters), shift detail (instant book, apply, negotiate, accept counter)
 - [x] My shifts diary (list + calendar, timesheet submission), finance (invoices, timesheets), compliance passport + upload + preferences
 - [x] Notification bell
-- [ ] Live clock-in/out (timesheets are entered manually)
+- [x] Live clock-in/out on the shift page (clock-in opens 1h before start; clock-out submits the timesheet)
 - [x] Clearing the minimum-rate threshold / standard rate
 - [ ] Push / email notifications; installable PWA
 

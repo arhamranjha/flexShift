@@ -141,6 +141,8 @@ export function createApiClient(opts: ClientOptions) {
       submit: (body: { shiftId: string; clockInTime: string; clockOutTime: string; breakMinutes?: number; notes?: string }) =>
         send<T.Timesheet>('POST', '/timesheets/submit', body),
       approve: (id: string) => send<{ timesheet: T.Timesheet; invoice: T.Invoice }>('PATCH', `/timesheets/${id}/approve`),
+      clockIn: (shiftId: string) => send<T.Shift>('POST', '/timesheets/clock-in', { shiftId }),
+      clockOut: (body: { shiftId: string; breakMinutes?: number; notes?: string }) => send<T.Timesheet>('POST', '/timesheets/clock-out', body),
     },
     invoices: {
       byOrganization: (orgId: string, status?: T.InvoiceStatus) => get<T.Invoice[]>(`/invoices/organization/${orgId}`, { status }),

@@ -736,4 +736,39 @@ describe('automation: cascade, expiry, notifications, checklists, benchmarks', (
       expect(notes.some((n: any) => n.type === 'EMERGENCY_SHIFT' && n.link === `/shifts/${s.id}`)).toBe(true);
     }
   });
+
+  it('records live clock-in and clock-out and turns them into a timesheet', async () => {
+    const mk = (title: string, startOffsetH: number, endOffsetH: number, worker = sarahId) =>
+      prisma.shift.create({
+        data: {
+          branchId: richmondId, title, startTime: new Date(Date.now() + startOffsetH * 3_600_000), endTime: new Date(Date.now() + endOffsetH * 3_600_000),
+          hourlyRate: 40, totalEstimatedPay: 320, status: 'BOOKED', assignedWorkerId: worker, visibility: 'PUBLIC_MARKETPLACE', requiredSystems: [], requiredAccreditations: [],
+        },
+      });
+    const future = await mk('Clock too early', 48, 56);
+    await post(sarahT, '/timesheets/clock-in', { shiftId: future.id }).expect(400); // more than 1h before the start
+    await post(sarahT, '/timesheets/clock-out', { shiftId: future.id }).expect(400); // not clocked in
+
+    const live = await mk('Clock live', -2, 6);
+    await post(davidT, '/timesheets/clock-in', { shiftId: live.id }).expect(404); // not his shift
+    await post(richmondT, '/timesheets/clock-in', { shiftId: live.id }).expect(403); // staff cannot clock a worker in
+    const started = (await post(sarahT, '/timesheets/clock-in', { shiftId: live.id }).expect(201)).body;
+    expect(started.status).toBe('IN_PROGRESS');
+    expect(started.workerClockInAt).toBeTruthy();
+    await post(sarahT, '/timesheets/clock-in', { shiftId: live.id }).expect(400); // already in progress
+    await post(sarahT, '/timesheets/clock-out', { shiftId: live.id }).expect(400); // 0 minutes worked
+
+    // pretend the clock-in happened 3 hours ago
+    await prisma.shift.update({ where: { id: live.id }, data: { workerClockInAt: new Date(Date.now() - 3 * 3_600_000) } });
+    const ts = (await post(sarahT, '/timesheets/clock-out', { shiftId: live.id, breakMinutes: 30, notes: 'busy day' }).expect(201)).body;
+    expect(Number(ts.billableHours)).toBeCloseTo(2.5, 1);
+    expect(Number(ts.totalPayout)).toBeCloseTo(100, 0);
+    expect(ts.status).toBe('SUBMITTED');
+    await post(sarahT, '/timesheets/clock-out', { shiftId: live.id }).expect(409); // already submitted
+
+    // a manager can still approve it while the shift is IN_PROGRESS
+    const approved = (await patch(richmondT, `/timesheets/${ts.id}/approve`).expect(200)).body;
+    expect(approved.invoice.invoiceNumber).toMatch(/^INV-/);
+    expect((await prisma.shift.findUnique({ where: { id: live.id } })).status).toBe('COMPLETED');
+  });
 });

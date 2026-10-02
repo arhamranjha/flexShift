@@ -3,7 +3,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { TimesheetStatus, InvoiceStatus, ShiftStatus } from '@prisma/client';
 import { randomBytes } from 'crypto';
 import { AccessService, AuthUser } from '../common/access.service';
-import { SubmitTimesheetDto } from './dto/timesheet.dto';
+import { ClockInDto, ClockOutDto, SubmitTimesheetDto } from './dto/timesheet.dto';
 import { NotificationsService } from '../notifications/notifications.service';
 
 const MINUTE = 60_000;
@@ -60,8 +60,8 @@ export class TimesheetsService {
     }
 
     const totalMinutes = (clockOut.getTime() - clockIn.getTime()) / (1000 * 60) - breakMins;
-    if (totalMinutes <= 0) {
-      throw new BadRequestException('Invalid duration after break deduction');
+    if (totalMinutes < 1) {
+      throw new BadRequestException('Worked time must be at least one minute after the break is deducted');
     }
 
     const billableHours = Number((totalMinutes / 60).toFixed(2));
@@ -97,6 +97,45 @@ export class TimesheetsService {
       type: 'TIMESHEET_SUBMITTED', title: 'Timesheet awaiting approval', body: shift.title, link: '/timesheets',
     });
     return this.prisma.timesheet.findUnique({ where: { shiftId: data.shiftId }, include: { shift: true, branch: true } });
+  }
+
+  /** Starts the shift: allowed from 1h before the start until the shift ends, once, for the assigned worker. */
+  async clockIn(reliefWorkerId: string, dto: ClockInDto) {
+    const shift = await this.prisma.shift.findUnique({ where: { id: dto.shiftId } });
+    if (!shift || shift.assignedWorkerId !== reliefWorkerId) throw new NotFoundException('Shift not found');
+    if (shift.status !== ShiftStatus.BOOKED) throw new BadRequestException(`You cannot clock in to a ${shift.status} shift`);
+    const now = Date.now();
+    if (now < shift.startTime.getTime() - EARLY_CLOCK_IN) throw new BadRequestException('Too early: you can clock in up to 1 hour before the start');
+    if (now > shift.endTime.getTime()) throw new BadRequestException('This shift has already ended: submit a timesheet instead');
+
+    const res = await this.prisma.shift.updateMany({
+      where: { id: dto.shiftId, assignedWorkerId: reliefWorkerId, status: ShiftStatus.BOOKED, workerClockInAt: null },
+      data: { status: ShiftStatus.IN_PROGRESS, workerClockInAt: new Date(now) },
+    });
+    if (res.count === 0) throw new ConflictException('You are already clocked in');
+    await this.notifications.notifyBranchStaff(shift.branchId, {
+      type: 'WORKER_CLOCKED_IN', title: 'Worker clocked in', body: shift.title, link: '/rota',
+    });
+    return this.prisma.shift.findUnique({ where: { id: dto.shiftId }, include: { branch: true } });
+  }
+
+  /** Ends the shift and submits the timesheet from the recorded clock-in to now. */
+  async clockOut(reliefWorkerId: string, dto: ClockOutDto) {
+    const shift = await this.prisma.shift.findUnique({ where: { id: dto.shiftId } });
+    if (!shift || shift.assignedWorkerId !== reliefWorkerId) throw new NotFoundException('Shift not found');
+    if (shift.status !== ShiftStatus.IN_PROGRESS || !shift.workerClockInAt) {
+      throw new BadRequestException('You are not clocked in to this shift');
+    }
+    if (await this.prisma.timesheet.findUnique({ where: { shiftId: dto.shiftId }, select: { id: true } })) {
+      throw new ConflictException('A timesheet has already been submitted for this shift');
+    }
+    return this.submitTimesheet(reliefWorkerId, {
+      shiftId: dto.shiftId,
+      clockInTime: shift.workerClockInAt.toISOString(),
+      clockOutTime: new Date().toISOString(),
+      breakMinutes: dto.breakMinutes,
+      notes: dto.notes,
+    });
   }
 
   async approveTimesheet(timesheetId: string, user: AuthUser) {

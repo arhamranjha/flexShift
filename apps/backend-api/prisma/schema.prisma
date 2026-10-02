@@ -263,6 +263,8 @@ model Shift {
   // Tiered cascade: 1 = Tier 1 only, 2 = Tier 1-2, 3 = whole staff bank. Marketplace release flips visibility.
   cascadeStage          Int                 @default(3)
   nextCascadeAt         DateTime?
+  // Set when the assigned worker clocks in from the portal; clock-out turns it into a timesheet.
+  workerClockInAt       DateTime?
   notes                 String?
   assignedWorkerId      String?
   assignedWorker        ReliefProfile?      @relation("AssignedReliefWorker", fields: [assignedWorkerId], references: [id], onDelete: SetNull)

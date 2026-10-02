@@ -1,10 +1,10 @@
 'use client';
 
 import { Badge, Button, Card, ErrorBlock, Field, Input, LoadingBlock, Modal, StatusBadge, Textarea, useAction, useAsync } from '@flexshift/ui';
-import { fmtRange, gbp, shiftHours, toNumber } from '@flexshift/api-client';
-import { Check, Heart, MapPin, Phone, X } from 'lucide-react';
+import { fmtRange, gbp, shiftHours, toNumber, type Shift } from '@flexshift/api-client';
+import { Check, Heart, MapPin, Phone, Timer, X } from 'lucide-react';
 import { useParams } from 'next/navigation';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { PageTitle, Payout, ProblemList, ShiftBadges, eligibilityProblems } from '@/components/common';
 import { api, useAuth } from '@/lib/auth';
 
@@ -17,6 +17,61 @@ function Req({ name, ok }: { name: string; ok: boolean }) {
       <span className={ok ? 'text-slate-800' : 'text-rose-700 font-medium'}>{name}</span>
     </li>
   );
+}
+
+const HOUR_MS = 3_600_000;
+
+/** Live clock-in / clock-out for the worker who is booked on the shift. */
+function ClockCard({ shift, onChanged }: { shift: Shift; onChanged: () => void }) {
+  const { run, busy } = useAction();
+  const [now, setNow] = useState(() => Date.now());
+  const [breakMins, setBreakMins] = useState('0');
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 30_000);
+    return () => clearInterval(t);
+  }, []);
+
+  const start = new Date(shift.startTime).getTime();
+  const end = new Date(shift.endTime).getTime();
+  const sheet = shift.timesheet;
+  const brk = Number(breakMins);
+  const brkErr = !Number.isInteger(brk) || brk < 0 || brk > 480 ? 'Enter whole minutes between 0 and 480' : undefined;
+
+  if (sheet) {
+    return <Card className="p-4 flex items-center justify-between"><span className="text-sm font-semibold">Timesheet</span><StatusBadge status={sheet.status} /></Card>;
+  }
+  if (shift.status === 'IN_PROGRESS' && shift.workerClockInAt) {
+    const since = new Date(shift.workerClockInAt).getTime();
+    const mins = Math.max(0, Math.floor((now - since) / 60_000));
+    return (
+      <Card className="p-4 space-y-3 border-emerald-300">
+        <div className="flex items-center gap-2 text-emerald-800 font-semibold"><Timer className="w-4 h-4" /> Clocked in at {new Date(since).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}</div>
+        <p className="text-sm text-slate-600">{Math.floor(mins / 60)}h {mins % 60}m so far. Clocking out submits your timesheet for approval.</p>
+        <Field label="Unpaid break (minutes)" error={brkErr}>
+          <Input type="number" inputMode="numeric" min={0} max={480} className="min-h-[44px] text-base" value={breakMins} onChange={(e) => setBreakMins(e.target.value)} />
+        </Field>
+        <Button className="w-full min-h-[48px] text-base" loading={busy} disabled={!!brkErr}
+          onClick={async () => { if (await run(() => api.timesheets.clockOut({ shiftId: shift.id, breakMinutes: brk }), 'Clocked out: timesheet submitted')) onChanged(); }}>
+          Clock out and submit
+        </Button>
+      </Card>
+    );
+  }
+  if (shift.status === 'BOOKED') {
+    const opensAt = start - HOUR_MS;
+    if (now < opensAt) {
+      return <Card className="p-4 text-sm text-slate-600">Clock-in opens at {new Date(opensAt).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })} on the day of the shift.</Card>;
+    }
+    if (now <= end) {
+      return (
+        <Button className="w-full min-h-[52px] text-base" loading={busy}
+          onClick={async () => { if (await run(() => api.timesheets.clockIn(shift.id), 'Clocked in')) onChanged(); }}>
+          <Timer className="w-4 h-4" /> Clock in
+        </Button>
+      );
+    }
+  }
+  return null;
 }
 
 export default function ShiftDetailPage() {
@@ -133,6 +188,8 @@ export default function ShiftDetailPage() {
             ) : <p className="text-xs text-slate-500">Waiting for the manager to respond.</p>}
           </Card>
         )}
+
+        {isMine && <ClockCard shift={shift} onChanged={reload} />}
 
         {application && !isMine && <Card className="p-4 flex items-center justify-between"><span className="text-sm font-semibold">Your application</span><StatusBadge status={application.status} /></Card>}
 

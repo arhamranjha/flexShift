@@ -5,7 +5,7 @@ import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { Role } from '@prisma/client';
-import { SubmitTimesheetDto, TimesheetQueryDto } from './dto/timesheet.dto';
+import { ClockInDto, ClockOutDto, SubmitTimesheetDto, TimesheetQueryDto } from './dto/timesheet.dto';
 
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('timesheets')
@@ -16,6 +16,18 @@ export class TimesheetsController {
   @Roles(Role.RELIEF_WORKER)
   submit(@CurrentUser() user: any, @Body() body: SubmitTimesheetDto) {
     return this.timesheetsService.submitTimesheet(user.reliefProfile.id, body);
+  }
+
+  @Post('clock-in')
+  @Roles(Role.RELIEF_WORKER)
+  clockIn(@CurrentUser() user: any, @Body() body: ClockInDto) {
+    return this.timesheetsService.clockIn(user.reliefProfile.id, body);
+  }
+
+  @Post('clock-out')
+  @Roles(Role.RELIEF_WORKER)
+  clockOut(@CurrentUser() user: any, @Body() body: ClockOutDto) {
+    return this.timesheetsService.clockOut(user.reliefProfile.id, body);
   }
 
   @Patch(':id/approve')

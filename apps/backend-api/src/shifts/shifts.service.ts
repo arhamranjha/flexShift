@@ -141,6 +141,7 @@ export class ShiftsService {
       const data: Prisma.ShiftUncheckedUpdateManyInput = { status: dto.status };
       if (dto.status === ShiftStatus.CANCELLED || (shift.status === ShiftStatus.BOOKED && dto.status === ShiftStatus.OPEN)) {
         data.assignedWorkerId = null; // releases the worker
+        data.workerClockInAt = null;
         // A pending timesheet for a released worker must not be approvable.
         await tx.timesheet.deleteMany({ where: { shiftId: id, status: 'SUBMITTED' } });
       }
@@ -292,6 +293,7 @@ export class ShiftsService {
           applications: { where: { reliefWorkerId: workerId } },
           negotiations: { where: { reliefWorkerId: workerId }, orderBy: { createdAt: 'desc' } },
           watchedBy: { where: { reliefWorkerId: workerId } },
+          timesheet: { select: { id: true, status: true } },
         },
       }),
       this.prisma.staffBankMember.findMany({ where: { reliefWorkerId: workerId } }),

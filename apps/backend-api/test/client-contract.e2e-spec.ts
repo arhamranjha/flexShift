@@ -195,6 +195,25 @@ describe('api-client against the live API', () => {
     await mgr.api.leave.review(leave.id, 'APPROVED', true, 34);
   });
 
+  it('live clock-in / clock-out through the client', async () => {
+    const { PrismaService } = await import('../src/prisma/prisma.service');
+    const prisma = app.get(PrismaService);
+    const live = await prisma.shift.create({
+      data: {
+        branchId: richmondId, title: 'Contract live shift', startTime: new Date(Date.now() - 2 * 3_600_000), endTime: new Date(Date.now() + 5 * 3_600_000),
+        hourlyRate: 30, totalEstimatedPay: 210, status: 'BOOKED', assignedWorkerId: sarahId, visibility: 'PUBLIC_MARKETPLACE', requiredSystems: [], requiredAccreditations: [],
+      },
+    });
+    const started = await sarah.api.timesheets.clockIn(live.id);
+    expect(started.status).toBe('IN_PROGRESS');
+    expect((await sarah.api.shifts.get(live.id)).workerClockInAt).toBeTruthy();
+    await prisma.shift.update({ where: { id: live.id }, data: { workerClockInAt: new Date(Date.now() - 2 * 3_600_000) } });
+    const ts = await sarah.api.timesheets.clockOut({ shiftId: live.id, breakMinutes: 15, notes: 'ok' });
+    expect(ts.status).toBe('SUBMITTED');
+    expect((await sarah.api.shifts.get(live.id)).timesheet?.status).toBe('SUBMITTED');
+    await expect(sarah.api.timesheets.clockOut({ shiftId: live.id })).rejects.toBeInstanceOf(ApiError);
+  });
+
   it('settings, notifications, logout', async () => {
     expect((await admin.api.organizations.get(orgId)).branches!.length).toBeGreaterThanOrEqual(2);
     await admin.api.organizations.update(orgId, { name: 'Apex Healthcare Group', billingEmail: 'billing@apexhealth.co.uk', phone: '+44 20 7946 0910', requiredDocTypes: [] });
