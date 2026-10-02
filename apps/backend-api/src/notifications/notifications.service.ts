@@ -87,6 +87,24 @@ export class NotificationsService {
     });
   }
 
+  /**
+   * Emergency broadcasts ignore minimum-rate thresholds: every verified, active worker of the right
+   * profession is told straight away.
+   */
+  async notifyEmergency(shift: { id: string; title: string; roleRequired: string; hourlyRate: unknown }) {
+    const workers = await this.prisma.reliefProfile.findMany({
+      where: { isVerified: true, profession: shift.roleRequired, user: { isActive: true } },
+      select: { userId: true },
+      take: 500,
+    });
+    await this.notifyUsers(workers.map((w) => w.userId), {
+      type: 'EMERGENCY_SHIFT',
+      title: 'Emergency shift needs cover',
+      body: `${shift.title} at £${Number(shift.hourlyRate).toFixed(2)}/h`,
+      link: `/shifts/${shift.id}`,
+    });
+  }
+
   list(userId: string) {
     return Promise.all([
       this.prisma.notification.findMany({ where: { userId }, orderBy: { createdAt: 'desc' }, take: 50 }),

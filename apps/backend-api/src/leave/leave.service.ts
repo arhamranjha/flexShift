@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { LeaveStatus, LeaveType, ShiftStatus, ShiftVisibility } from '@prisma/client';
 import { AccessService, AuthUser } from '../common/access.service';
@@ -34,9 +34,10 @@ export class LeaveService {
 
   async submitLeave(user: AuthUser, data: SubmitLeaveDto) {
     await this.access.assertBranch(user, data.branchId);
-    if (new Date(data.endDate) < new Date(data.startDate)) {
-      throw new BadRequestException('End date must not be before start date');
-    }
+    const start = new Date(data.startDate);
+    const end = new Date(data.endDate);
+    if (end < start) throw new BadRequestException('End date must not be before start date');
+    await this.assertNoOverlap(data.branchId, data.staffName, start, end);
     return this.prisma.leaveRequest.create({
       data: {
         branchId: data.branchId,
@@ -49,6 +50,25 @@ export class LeaveService {
         status: LeaveStatus.PENDING,
       },
     });
+  }
+
+  /** The same person cannot have two overlapping pending/approved leave requests at a branch. */
+  private async assertNoOverlap(branchId: string, staffName: string, start: Date, end: Date, excludeId?: string, statuses: LeaveStatus[] = [LeaveStatus.PENDING, LeaveStatus.APPROVED]) {
+    const clash = await this.prisma.leaveRequest.findFirst({
+      where: {
+        branchId,
+        staffName: { equals: staffName.trim(), mode: 'insensitive' },
+        status: { in: statuses },
+        startDate: { lte: end },
+        endDate: { gte: start },
+        ...(excludeId ? { id: { not: excludeId } } : {}),
+      },
+    });
+    if (clash) {
+      throw new ConflictException(
+        `${clash.staffName} already has ${clash.status.toLowerCase()} leave from ${clash.startDate.toISOString().slice(0, 10)} to ${clash.endDate.toISOString().slice(0, 10)}`,
+      );
+    }
   }
 
   async reviewLeave(
@@ -65,6 +85,9 @@ export class LeaveService {
     if (!leave) throw new NotFoundException('Leave request not found');
     if (leave.status !== LeaveStatus.PENDING) {
       throw new BadRequestException(`Leave request was already ${leave.status.toLowerCase()}`);
+    }
+    if (status === LeaveStatus.APPROVED) {
+      await this.assertNoOverlap(leave.branchId, leave.staffName, leave.startDate, leave.endDate, leave.id, [LeaveStatus.APPROVED]);
     }
 
     return this.prisma.$transaction(async (tx) => {

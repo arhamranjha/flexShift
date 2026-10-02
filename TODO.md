@@ -20,11 +20,11 @@ Legend: [x] done · [~] partly done · [ ] not started
 - [ ] Real BACS file: needs worker bank details (CSV payment batch exists, no sort code/account no.)
 - [ ] Accounting-software export
 - [ ] HTTP-only cookie auth (spec) — both apps use bearer tokens in localStorage
-- [ ] Leave overlap detection against the rota before approval
+- [x] Leave conflict detection (same person cannot hold overlapping pending/approved leave at a branch)
 - [ ] Per-organization document *verification* (today any in-scope organization can verify a worker's documents; verified status is global)
 - [ ] Worker distance/postcode filtering for the feed
 - [ ] ESLint + Prettier (lint script is type-checking only)
-- [ ] Emergency broadcast as a distinct dispatch mode (today it behaves as public)
+- [x] Emergency broadcast: notifies every verified worker and ignores minimum-rate thresholds (feed emergencies tab too)
 
 ## Organization dashboard (`apps/web-admin`)
 - [x] Login, forced password change, role-aware navigation, branch scope picker
@@ -34,14 +34,14 @@ Legend: [x] done · [~] partly done · [ ] not started
 - [x] Notification bell
 - [ ] Live browser walkthrough: pages compile, type-check and are covered by the client contract test, but nobody has clicked through them (browser tooling was unavailable)
 - [ ] Modal-level a11y beyond focus trap (labelled landmarks, screen-reader pass)
-- [ ] Clearing optional values (e.g. a staff-bank custom rate) once set
+- [x] Clearing optional values (staff-bank custom rate)
 
 ## Worker portal (`apps/worker-portal`)
 - [x] Register (2-step) / login, feed (For you, Watching, Favourites, Emergencies, filters), shift detail (instant book, apply, negotiate, accept counter)
 - [x] My shifts diary (list + calendar, timesheet submission), finance (invoices, timesheets), compliance passport + upload + preferences
 - [x] Notification bell
 - [ ] Live clock-in/out (timesheets are entered manually)
-- [ ] Clearing the minimum-rate threshold once set
+- [x] Clearing the minimum-rate threshold / standard rate
 - [ ] Push / email notifications; installable PWA
 
 ## Infrastructure

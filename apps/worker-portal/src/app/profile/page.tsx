@@ -149,8 +149,9 @@ function Preferences({ profile, onSaved }: { profile: ReliefProfile; onSaved: ()
 
   async function save() {
     const body = {
-      ...(minRate !== '' && { minimumShiftRate: Number(minRate) }),
-      ...(rate !== '' && { hourlyRate: Number(rate) }),
+      // Blank clears the value (null); a number sets it.
+      minimumShiftRate: minRate !== '' ? Number(minRate) : null,
+      hourlyRate: rate !== '' ? Number(rate) : null,
       bio, systemTags: systems, accreditations: accr,
     };
     if (await run(() => api.workers.updatePreferences(body), 'Preferences saved')) onSaved();

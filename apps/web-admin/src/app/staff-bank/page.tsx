@@ -54,7 +54,9 @@ export default function StaffBankPage() {
   const saveEdit = async () => {
     if (!editing) return;
     const body: Parameters<typeof api.staffBank.update>[1] = { notes: notes.trim() };
+    // Blank clears a previously agreed rate; a number sets it.
     if (rateNum !== undefined) body.customHourlyRate = rateNum;
+    else if (editing.customHourlyRate != null) body.customHourlyRate = null;
     if (await update(editing, body, 'Staff bank member updated')) setEditing(null);
   };
 

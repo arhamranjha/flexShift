@@ -21,11 +21,13 @@ export class JobsService {
 
   @Cron(CronExpression.EVERY_MINUTE)
   async cascadeTick() {
+    if (process.env.DISABLE_CRON === 'true') return;
     try { await this.runCascade(); } catch (e) { this.log.error(`cascade failed: ${(e as Error).message}`); }
   }
 
   @Cron('0 6 * * *')
   async expiryTick() {
+    if (process.env.DISABLE_CRON === 'true') return;
     try { await this.runExpiry(); } catch (e) { this.log.error(`expiry failed: ${(e as Error).message}`); }
   }
 

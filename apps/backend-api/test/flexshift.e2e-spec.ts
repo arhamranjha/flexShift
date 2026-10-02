@@ -11,7 +11,11 @@ const DAY = 86_400_000;
 
 let app: INestApplication;
 let prisma: PrismaService;
-const api = () => request(app.getHttpServer());
+// Listen once and send every request to that one URL. Passing the http.Server to supertest instead makes it
+// bind a throwaway ephemeral port per request and close it afterwards; with concurrent requests a call can land
+// on a port that has just closed (and may now belong to some other local service), giving random 401/404/503s.
+let baseUrl: string;
+const api = () => request(baseUrl);
 
 async function login(email: string, password = PW) {
   const r = await api().post('/auth/login').send({ email, password }).expect(200);
@@ -36,7 +40,8 @@ beforeAll(async () => {
   const mod = await Test.createTestingModule({ imports: [AppModule] }).compile();
   app = mod.createNestApplication();
   configureApp(app);
-  await app.init();
+  await app.listen(0);
+  baseUrl = (await app.getUrl()).replace('[::1]', '127.0.0.1');
   prisma = app.get(PrismaService);
 
   [superT, adminT, richmondT, beckenhamT, sarahT, davidT] = await Promise.all([
@@ -682,5 +687,53 @@ describe('automation: cascade, expiry, notifications, checklists, benchmarks', (
     await prisma.complianceDocument.update({ where: { id: doc.id }, data: { status: 'VERIFIED', expiresAt: new Date(Date.now() + 500 * DAY), expiryNotified7: false, expiryNotified30: false } });
     await prisma.reliefProfile.update({ where: { id: davidId }, data: { isVerified: true } });
     await patch(richmondT, `/shifts/${s.id}/status`, { status: 'CANCELLED' }).expect(200);
+  });
+
+  it('lets rates be cleared again with null (and still rejects junk)', async () => {
+    const member = (await post(adminT, '/staff-bank', { reliefWorkerId: davidId, customHourlyRate: 33 }).expect(201)).body;
+    expect(Number(member.customHourlyRate)).toBe(33);
+    const cleared = (await patch(adminT, `/staff-bank/${member.id}`, { customHourlyRate: null }).expect(200)).body;
+    expect(cleared.customHourlyRate).toBeNull();
+    await patch(adminT, `/staff-bank/${member.id}`, { customHourlyRate: 'lots' }).expect(400);
+    await patch(adminT, `/staff-bank/${member.id}`, { customHourlyRate: 0 }).expect(400);
+    await api().delete(`/staff-bank/${member.id}`).set('Authorization', `Bearer ${adminT}`).expect(200);
+
+    await patch(sarahT, '/relief-workers/me/preferences', { minimumShiftRate: 31 }).expect(200);
+    const off = (await patch(sarahT, '/relief-workers/me/preferences', { minimumShiftRate: null, hourlyRate: null }).expect(200)).body;
+    expect(off.minimumShiftRate).toBeNull();
+    expect(off.hourlyRate).toBeNull();
+    await patch(sarahT, '/relief-workers/me/preferences', { minimumShiftRate: -1 }).expect(400);
+    await patch(sarahT, '/relief-workers/me/preferences', { minimumShiftRate: 28, hourlyRate: 32.5 }).expect(200); // restore seed values
+  });
+
+  it('rejects overlapping leave for the same person at a branch', async () => {
+    const body = (startDays: number, endDays: number, name = 'Sam Overlap') => ({
+      branchId: richmondId, staffName: name, staffRole: 'Pharmacist', startDate: at(80 + startDays, 9), endDate: at(80 + endDays, 17),
+    });
+    const first = (await post(richmondT, '/leave', body(0, 3)).expect(201)).body;
+    await post(richmondT, '/leave', body(2, 5)).expect(409); // overlaps the pending request
+    await post(richmondT, '/leave', body(2, 5, 'sam overlap')).expect(409); // names compare case-insensitively
+    await post(richmondT, '/leave', body(2, 5, 'Someone Else')).expect(201); // other people are unaffected
+    await post(richmondT, '/leave', body(4, 6)).expect(201); // adjacent but not overlapping
+    await patch(richmondT, `/leave/${first.id}/review`, { status: 'REJECTED' }).expect(200);
+    await post(richmondT, '/leave', body(1, 2)).expect(201); // the rejected request no longer blocks its dates
+  });
+
+  it('broadcasts emergencies to every verified worker, ignoring minimum-rate thresholds', async () => {
+    const title = `Emergency ${Date.now()}`;
+    // Sarah's saved minimum (28) is above this rate, so a normal shift would be hidden from her
+    const s = (
+      await post(richmondT, '/shifts', {
+        branchId: richmondId, title, startTime: at(65, 9), endTime: at(65, 17), hourlyRate: 5, visibility: 'EMERGENCY_BROADCAST', isEmergency: true,
+      }).expect(201)
+    ).body;
+    const forYou = (await get(sarahT, '/shifts/feed?tab=for_you').expect(200)).body.map((x: any) => x.title);
+    const emergencies = (await get(sarahT, '/shifts/feed?tab=emergencies').expect(200)).body.map((x: any) => x.title);
+    expect(forYou).not.toContain(title);
+    expect(emergencies).toContain(title);
+    for (const t of [sarahT, davidT]) {
+      const notes = (await get(t, '/notifications').expect(200)).body.items;
+      expect(notes.some((n: any) => n.type === 'EMERGENCY_SHIFT' && n.link === `/shifts/${s.id}`)).toBe(true);
+    }
   });
 });

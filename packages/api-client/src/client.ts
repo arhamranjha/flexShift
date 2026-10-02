@@ -113,7 +113,7 @@ export function createApiClient(opts: ClientOptions) {
       list: (orgId: string, branchId?: string) => get<T.StaffBankMember[]>(`/staff-bank/organization/${orgId}`, { branchId }),
       add: (body: { reliefWorkerId: string; branchId?: string; tier?: T.StaffBankTier; customHourlyRate?: number; notes?: string; organizationId?: string }) =>
         send<T.StaffBankMember>('POST', '/staff-bank', body),
-      update: (id: string, body: { tier?: T.StaffBankTier; customHourlyRate?: number; isActive?: boolean; notes?: string }) =>
+      update: (id: string, body: { tier?: T.StaffBankTier; customHourlyRate?: number | null; isActive?: boolean; notes?: string }) =>
         send<T.StaffBankMember>('PATCH', `/staff-bank/${id}`, body),
       remove: (id: string) => send<T.StaffBankMember>('DELETE', `/staff-bank/${id}`),
     },
@@ -130,7 +130,7 @@ export function createApiClient(opts: ClientOptions) {
       uploadDocument: (workerId: string, form: FormData) => json<T.ComplianceDocument>(`/relief-workers/${workerId}/documents`, { method: 'POST', body: form }),
       /** Documents need the bearer token, so fetch the bytes and hand back a Blob (use URL.createObjectURL). */
       documentBlob: async (docId: string) => (await raw(`/relief-workers/documents/${docId}/file`)).blob(),
-      updatePreferences: (body: { minimumShiftRate?: number; hourlyRate?: number; bio?: string; systemTags?: string[]; accreditations?: string[] }) =>
+      updatePreferences: (body: { minimumShiftRate?: number | null; hourlyRate?: number | null; bio?: string; systemTags?: string[]; accreditations?: string[] }) =>
         send<T.ReliefProfile>('PATCH', '/relief-workers/me/preferences', body),
       toggleWatch: (shiftId: string) => send<{ watched: boolean }>('POST', `/relief-workers/me/watch-shift/${shiftId}`),
       toggleFavourite: (branchId: string) => send<{ favourited: boolean }>('POST', `/relief-workers/me/favourite-branch/${branchId}`),

@@ -63,7 +63,8 @@ export class ShiftsService {
     if (cascading) await this.notifications.notifyTierMembers(created, 1);
     else if (visibility === ShiftVisibility.STAFF_BANK_ONLY) {
       for (const stage of [1, 2, 3]) await this.notifications.notifyTierMembers(created, stage);
-    } else await this.notifications.notifyRateMatches(created);
+    } else if (visibility === ShiftVisibility.EMERGENCY_BROADCAST) await this.notifications.notifyEmergency(created);
+    else await this.notifications.notifyRateMatches(created);
     return created;
   }
 
@@ -122,7 +123,10 @@ export class ShiftsService {
     });
     if (res.count === 0) throw new ConflictException('Shift changed while updating, please retry');
     const updated = await this.prisma.shift.findUnique({ where: { id } });
-    if (widened) await this.notifications.notifyRateMatches(updated);
+    if (widened) {
+      if (updated.visibility === ShiftVisibility.EMERGENCY_BROADCAST) await this.notifications.notifyEmergency(updated);
+      else await this.notifications.notifyRateMatches(updated);
+    }
     return updated;
   }
 
@@ -193,14 +197,15 @@ export class ShiftsService {
       ],
     });
 
-    const minRate = filter.minRate ?? (worker.minimumShiftRate ? Number(worker.minimumShiftRate) : undefined);
+    const tab = filter.tab || 'for_you';
+    // The worker's saved minimum rate hides low-paid shifts, except emergencies which are always shown.
+    const minRate = filter.minRate ?? (tab !== 'emergencies' && worker.minimumShiftRate ? Number(worker.minimumShiftRate) : undefined);
     if (minRate) where.hourlyRate = { gte: minRate };
 
     if (filter.startDate && filter.endDate) {
       where.startTime = { gte: new Date(filter.startDate), lte: new Date(filter.endDate) };
     }
 
-    const tab = filter.tab || 'for_you';
     if (tab === 'watching') {
       where.id = { in: worker.watchedShifts.map((w) => w.shiftId) };
     } else if (tab === 'favourites') {

@@ -1,6 +1,6 @@
 import { Transform, Type } from 'class-transformer';
 import {
-  IsArray, IsBoolean, IsDateString, IsEmail, IsEnum, IsIn, IsInt, IsNumber, IsOptional, IsString, Max, MaxLength, Min, MinLength,
+  IsArray, IsBoolean, IsDateString, IsEmail, IsEnum, IsIn, IsInt, IsNumber, IsOptional, IsString, Max, MaxLength, Min, MinLength, ValidateIf,
 } from 'class-validator';
 import { DocStatus, DocType } from '@prisma/client';
 
@@ -54,8 +54,11 @@ export class DocumentQueueQueryDto {
 }
 
 export class UpdatePreferencesDto {
-  @IsOptional() @IsNumber() @Min(0) @Max(1000) minimumShiftRate?: number;
-  @IsOptional() @IsNumber() @Min(0) @Max(1000) hourlyRate?: number;
+  /** null removes the threshold / standard rate. */
+  @ValidateIf((o) => o.minimumShiftRate !== undefined && o.minimumShiftRate !== null) @IsNumber() @Min(0) @Max(1000)
+  minimumShiftRate?: number | null;
+  @ValidateIf((o) => o.hourlyRate !== undefined && o.hourlyRate !== null) @IsNumber() @Min(0) @Max(1000)
+  hourlyRate?: number | null;
   @IsOptional() @IsString() @MaxLength(1000) bio?: string;
   @IsOptional() @IsArray() @IsString({ each: true }) systemTags?: string[];
   @IsOptional() @IsArray() @IsString({ each: true }) accreditations?: string[];
