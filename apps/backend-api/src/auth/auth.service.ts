@@ -3,6 +3,9 @@ import { JwtService } from '@nestjs/jwt';
 import { PrismaService } from '../prisma/prisma.service';
 import * as bcrypt from 'bcryptjs';
 import { Role } from '@prisma/client';
+import { RegisterReliefWorkerDto } from './dto/auth.dto';
+
+const DUMMY_HASH = bcrypt.hashSync('not-a-real-password', 10);
 
 @Injectable()
 export class AuthService {
@@ -20,7 +23,9 @@ export class AuthService {
         organization: true,
       },
     });
-    if (user && (await bcrypt.compare(pass, user.passwordHash))) {
+    // Always run a bcrypt compare so response time does not reveal whether the email exists.
+    const ok = await bcrypt.compare(pass, user?.passwordHash ?? DUMMY_HASH);
+    if (user && user.isActive && ok) {
       const { passwordHash, ...result } = user;
       return result;
     }
@@ -38,13 +43,14 @@ export class AuthService {
       data: { lastLoginAt: new Date() },
     });
 
-    const payload = { sub: user.id, email: user.email, role: user.role };
+    const payload = { sub: user.id, email: user.email, role: user.role, tv: user.tokenVersion };
     return {
       accessToken: this.jwtService.sign(payload),
       user: {
         id: user.id,
         email: user.email,
         role: user.role,
+        mustChangePassword: user.mustChangePassword,
         organizationId: user.organizationId,
         reliefProfile: user.reliefProfile,
         managedBranch: user.managedBranch,
@@ -52,19 +58,7 @@ export class AuthService {
     };
   }
 
-  async registerReliefWorker(dto: {
-    email: string;
-    password: string;
-    firstName: string;
-    lastName: string;
-    phone: string;
-    registrationNumber: string;
-    profession?: string;
-    hourlyRate?: number;
-    minimumShiftRate?: number;
-    systemTags?: string[];
-    accreditations?: string[];
-  }) {
+  async registerReliefWorker(dto: RegisterReliefWorkerDto) {
     const existing = await this.prisma.user.findUnique({ where: { email: dto.email } });
     if (existing) {
       throw new BadRequestException('Email already registered');
@@ -97,7 +91,7 @@ export class AuthService {
         },
       });
 
-      const payload = { sub: user.id, email: user.email, role: user.role };
+      const payload = { sub: user.id, email: user.email, role: user.role, tv: user.tokenVersion };
       return {
         accessToken: this.jwtService.sign(payload),
         user: {
@@ -108,5 +102,31 @@ export class AuthService {
         },
       };
     });
+  }
+
+  async logout(userId: string) {
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { tokenVersion: { increment: 1 } },
+    });
+    return { success: true };
+  }
+
+  async changePassword(userId: string, dto: { currentPassword: string; newPassword: string }) {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user || !(await bcrypt.compare(dto.currentPassword, user.passwordHash))) {
+      throw new UnauthorizedException('Current password is incorrect');
+    }
+    const updated = await this.prisma.user.update({
+      where: { id: userId },
+      data: {
+        passwordHash: await bcrypt.hash(dto.newPassword, 10),
+        mustChangePassword: false,
+        tokenVersion: { increment: 1 },
+      },
+    });
+    // Old tokens are now revoked; hand back a fresh one.
+    const payload = { sub: updated.id, email: updated.email, role: updated.role, tv: updated.tokenVersion };
+    return { accessToken: this.jwtService.sign(payload) };
   }
 }

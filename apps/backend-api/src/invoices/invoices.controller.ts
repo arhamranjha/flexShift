@@ -1,10 +1,12 @@
-import { Controller, Get, Patch, Param, Body, UseGuards } from '@nestjs/common';
+import { Controller, Get, Patch, Param, Body, Query, Res, UseGuards, ParseUUIDPipe } from '@nestjs/common';
+import { Response } from 'express';
 import { InvoicesService } from './invoices.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { Role } from '@prisma/client';
+import { InvoiceQueryDto, MarkPaidDto } from './dto/invoice.dto';
 
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('invoices')
@@ -13,8 +15,22 @@ export class InvoicesController {
 
   @Get('organization/:orgId')
   @Roles(Role.SUPER_ADMIN, Role.ORG_ADMIN)
-  findByOrganization(@Param('orgId') orgId: string) {
-    return this.invoicesService.findByOrganization(orgId);
+  findByOrganization(@CurrentUser() user: any, @Param('orgId', ParseUUIDPipe) orgId: string, @Query() q: InvoiceQueryDto) {
+    return this.invoicesService.findByOrganization(user, orgId, q.status);
+  }
+
+  @Get('organization/:orgId/export.csv')
+  @Roles(Role.SUPER_ADMIN, Role.ORG_ADMIN)
+  async exportCsv(
+    @CurrentUser() user: any,
+    @Param('orgId', ParseUUIDPipe) orgId: string,
+    @Query() q: InvoiceQueryDto,
+    @Res() res: Response,
+  ) {
+    const csv = await this.invoicesService.exportPaymentBatch(user, orgId, q.status);
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename="payment-batch.csv"');
+    res.send(csv);
   }
 
   @Get('my-finance')
@@ -25,7 +41,7 @@ export class InvoicesController {
 
   @Patch(':id/pay')
   @Roles(Role.SUPER_ADMIN, Role.ORG_ADMIN)
-  markPaid(@Param('id') id: string, @Body('paymentReference') ref: string) {
-    return this.invoicesService.markPaid(id, ref);
+  markPaid(@CurrentUser() user: any, @Param('id', ParseUUIDPipe) id: string, @Body() body: MarkPaidDto) {
+    return this.invoicesService.markPaid(user, id, body.paymentReference);
   }
 }

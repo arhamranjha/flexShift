@@ -1,138 +1,252 @@
-import { Injectable, BadRequestException, NotFoundException, ConflictException } from '@nestjs/common';
+import { Injectable, BadRequestException, NotFoundException, ConflictException, ForbiddenException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { ShiftStatus, ShiftVisibility, ApplicationStatus, NegotiationStatus } from '@prisma/client';
+import { ShiftStatus, ShiftVisibility, ApplicationStatus, NegotiationStatus, Role, Prisma } from '@prisma/client';
+import { AccessService, AuthUser } from '../common/access.service';
+import { assertShiftBookable, assertWorkerCanBook, lockWorker } from './eligibility';
+import { ApplyDto, AssignWorkerDto, CreateShiftDto, FeedQueryDto, ShiftListQueryDto, UpdateShiftDto, UpdateShiftStatusDto } from './dto/shift.dto';
+
+const HOUR = 3_600_000;
+
+/** Manager-driven transitions. COMPLETED is reached only through timesheet approval. */
+const TRANSITIONS: Partial<Record<ShiftStatus, ShiftStatus[]>> = {
+  DRAFT: [ShiftStatus.OPEN, ShiftStatus.CANCELLED],
+  OPEN: [ShiftStatus.CANCELLED],
+  IN_NEGOTIATION: [ShiftStatus.CANCELLED],
+  BOOKED: [ShiftStatus.IN_PROGRESS, ShiftStatus.OPEN, ShiftStatus.CANCELLED],
+  IN_PROGRESS: [ShiftStatus.CANCELLED],
+};
+
+const money = (hours: number, rate: number) => Number((hours * rate).toFixed(2));
 
 @Injectable()
 export class ShiftsService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private access: AccessService,
+  ) {}
 
-  async create(data: {
-    branchId: string;
-    title: string;
-    roleRequired?: string;
-    startTime: string | Date;
-    endTime: string | Date;
-    hourlyRate: number;
-    requiredSystems?: string[];
-    requiredAccreditations?: string[];
-    visibility?: ShiftVisibility;
-    instantBookEnabled?: boolean;
-    isOvernight?: boolean;
-    isEmergency?: boolean;
-    notes?: string;
-  }) {
-    const start = new Date(data.startTime);
-    const end = new Date(data.endTime);
-    if (end <= start) {
-      throw new BadRequestException('End time must be after start time');
-    }
-
-    const hours = (end.getTime() - start.getTime()) / (1000 * 60 * 60);
-    const totalEstimatedPay = Number((hours * data.hourlyRate).toFixed(2));
+  async create(user: AuthUser, dto: CreateShiftDto) {
+    await this.access.assertBranch(user, dto.branchId);
+    const start = new Date(dto.startTime);
+    const end = new Date(dto.endTime);
+    if (end <= start) throw new BadRequestException('End time must be after start time');
+    if (start.getTime() < Date.now()) throw new BadRequestException('Shift cannot start in the past');
 
     return this.prisma.shift.create({
       data: {
-        branchId: data.branchId,
-        title: data.title,
-        roleRequired: data.roleRequired || 'Pharmacist',
+        branchId: dto.branchId,
+        title: dto.title,
+        roleRequired: dto.roleRequired || 'Pharmacist',
         startTime: start,
         endTime: end,
-        hourlyRate: data.hourlyRate,
-        totalEstimatedPay,
-        requiredSystems: data.requiredSystems || [],
-        requiredAccreditations: data.requiredAccreditations || [],
-        visibility: data.visibility || ShiftVisibility.STAFF_BANK_ONLY,
-        instantBookEnabled: data.instantBookEnabled || false,
-        isOvernight: data.isOvernight || false,
-        isEmergency: data.isEmergency || false,
-        notes: data.notes,
+        hourlyRate: dto.hourlyRate,
+        totalEstimatedPay: money((end.getTime() - start.getTime()) / HOUR, dto.hourlyRate),
+        requiredSystems: dto.requiredSystems || [],
+        requiredAccreditations: dto.requiredAccreditations || [],
+        visibility: dto.visibility || ShiftVisibility.STAFF_BANK_ONLY,
+        instantBookEnabled: dto.instantBookEnabled || false,
+        isOvernight: dto.isOvernight || false,
+        isEmergency: dto.isEmergency || false,
+        notes: dto.notes,
         status: ShiftStatus.OPEN,
       },
       include: { branch: true },
     });
   }
 
-  async getWorkerFeed(workerId: string, filter?: {
-    tab?: 'for_you' | 'watching' | 'favourites' | 'emergencies';
-    profession?: string;
-    minRate?: number;
-    startDate?: string;
-    endDate?: string;
-  }) {
+  async list(user: AuthUser, q: ShiftListQueryDto) {
+    if (q.branchId) await this.access.assertBranch(user, q.branchId);
+    return this.prisma.shift.findMany({
+      where: {
+        branch: this.access.branchScope(user),
+        ...(q.branchId ? { branchId: q.branchId } : {}),
+        ...(q.status ? { status: q.status } : {}),
+        ...(q.startDate || q.endDate
+          ? { startTime: { ...(q.startDate ? { gte: new Date(q.startDate) } : {}), ...(q.endDate ? { lte: new Date(q.endDate) } : {}) } }
+          : {}),
+      },
+      orderBy: { startTime: 'asc' },
+      include: {
+        branch: { select: { id: true, name: true, branchCode: true } },
+        assignedWorker: { select: { id: true, firstName: true, lastName: true } },
+        _count: { select: { applications: true, negotiations: true } },
+      },
+      take: 500,
+    });
+  }
+
+  async update(user: AuthUser, id: string, dto: UpdateShiftDto) {
+    const shift = await this.access.assertShift(user, id);
+    if (shift.status === ShiftStatus.COMPLETED || shift.status === ShiftStatus.CANCELLED || shift.status === ShiftStatus.IN_PROGRESS) {
+      throw new BadRequestException(`A ${shift.status} shift cannot be edited`);
+    }
+    if (shift.status === ShiftStatus.BOOKED) {
+      const locked = Object.keys(dto).filter((k) => !['title', 'notes'].includes(k) && dto[k as keyof UpdateShiftDto] !== undefined);
+      if (locked.length) {
+        throw new BadRequestException(`A booked shift only allows editing title and notes (not: ${locked.join(', ')})`);
+      }
+    }
+    const start = dto.startTime ? new Date(dto.startTime) : shift.startTime;
+    const end = dto.endTime ? new Date(dto.endTime) : shift.endTime;
+    const rate = dto.hourlyRate ?? Number(shift.hourlyRate);
+    if (end <= start) throw new BadRequestException('End time must be after start time');
+    if (shift.assignedWorkerId && (dto.startTime || dto.endTime)) {
+      throw new BadRequestException('Unassign the worker before changing the shift times');
+    }
+    const res = await this.prisma.shift.updateMany({
+      where: { id, status: shift.status },
+      data: {
+        ...dto,
+        startTime: start,
+        endTime: end,
+        hourlyRate: rate,
+        totalEstimatedPay: money((end.getTime() - start.getTime()) / HOUR, rate),
+      },
+    });
+    if (res.count === 0) throw new ConflictException('Shift changed while updating, please retry');
+    return this.prisma.shift.findUnique({ where: { id } });
+  }
+
+  async updateStatus(user: AuthUser, id: string, dto: UpdateShiftStatusDto) {
+    return this.prisma.$transaction(async (tx) => {
+      const shift = await tx.shift.findFirst({ where: { id, branch: this.access.branchScope(user) } });
+      if (!shift) throw new NotFoundException('Shift not found');
+      if (!TRANSITIONS[shift.status]?.includes(dto.status)) {
+        throw new BadRequestException(`Cannot move a shift from ${shift.status} to ${dto.status}`);
+      }
+
+      const data: Prisma.ShiftUncheckedUpdateManyInput = { status: dto.status };
+      if (dto.status === ShiftStatus.CANCELLED || (shift.status === ShiftStatus.BOOKED && dto.status === ShiftStatus.OPEN)) {
+        data.assignedWorkerId = null; // releases the worker
+        // A pending timesheet for a released worker must not be approvable.
+        await tx.timesheet.deleteMany({ where: { shiftId: id, status: 'SUBMITTED' } });
+      }
+      const res = await tx.shift.updateMany({ where: { id, status: shift.status }, data });
+      if (res.count === 0) throw new ConflictException('Shift changed while updating, please retry');
+
+      if (dto.status === ShiftStatus.CANCELLED || dto.status === ShiftStatus.OPEN) {
+        await tx.shiftApplication.updateMany({
+          where: { shiftId: id, status: ApplicationStatus.APPLIED },
+          data: { status: ApplicationStatus.REJECTED },
+        });
+        await tx.shiftNegotiation.updateMany({
+          where: { shiftId: id, status: { in: [NegotiationStatus.PENDING, NegotiationStatus.COUNTERED] } },
+          data: { status: NegotiationStatus.REJECTED },
+        });
+      }
+      return tx.shift.findUnique({ where: { id }, include: { branch: true, assignedWorker: true } });
+    });
+  }
+
+  async getWorkerFeed(workerId: string, filter: FeedQueryDto = {}) {
     const worker = await this.prisma.reliefProfile.findUnique({
       where: { id: workerId },
       include: {
         watchedShifts: { select: { shiftId: true } },
         favouriteBranches: { select: { branchId: true } },
-        staffBankMemberships: { select: { organizationId: true, branchId: true } },
+        staffBankMemberships: { select: { organizationId: true, branchId: true, isActive: true } },
       },
     });
-
     if (!worker) throw new NotFoundException('Worker profile not found');
 
-    const now = new Date();
-    const where: any = {
-      startTime: { gte: now },
+    const and: Prisma.ShiftWhereInput[] = [];
+    const where: Prisma.ShiftWhereInput = {
+      startTime: { gte: new Date() },
       status: { in: [ShiftStatus.OPEN, ShiftStatus.IN_NEGOTIATION] },
+      AND: and,
     };
 
-    if (filter?.minRate) {
-      where.hourlyRate = { gte: filter.minRate };
-    } else if (worker.minimumShiftRate) {
-      where.hourlyRate = { gte: worker.minimumShiftRate };
+    // Tiered visibility: staff-bank-only shifts only reach that organization's bank members.
+    const bankOrgs = worker.staffBankMemberships.filter((m) => m.isActive);
+    and.push({
+      OR: [
+        { visibility: { in: [ShiftVisibility.PUBLIC_MARKETPLACE, ShiftVisibility.EMERGENCY_BROADCAST] } },
+        ...bankOrgs.map((m) => ({
+          visibility: ShiftVisibility.STAFF_BANK_ONLY,
+          branch: { organizationId: m.organizationId },
+          ...(m.branchId ? { branchId: m.branchId } : {}),
+        })),
+      ],
+    });
+
+    const minRate = filter.minRate ?? (worker.minimumShiftRate ? Number(worker.minimumShiftRate) : undefined);
+    if (minRate) where.hourlyRate = { gte: minRate };
+
+    if (filter.startDate && filter.endDate) {
+      where.startTime = { gte: new Date(filter.startDate), lte: new Date(filter.endDate) };
     }
 
-    if (filter?.startDate && filter?.endDate) {
-      where.startTime = {
-        gte: new Date(filter.startDate),
-        lte: new Date(filter.endDate),
-      };
-    }
-
-    const tab = filter?.tab || 'for_you';
-
+    const tab = filter.tab || 'for_you';
     if (tab === 'watching') {
-      const watchedIds = worker.watchedShifts.map((w) => w.shiftId);
-      where.id = { in: watchedIds };
+      where.id = { in: worker.watchedShifts.map((w) => w.shiftId) };
     } else if (tab === 'favourites') {
-      const favBranchIds = worker.favouriteBranches.map((f) => f.branchId);
-      where.branchId = { in: favBranchIds };
+      where.branchId = { in: worker.favouriteBranches.map((f) => f.branchId) };
     } else if (tab === 'emergencies') {
       where.isEmergency = true;
-    } else {
-      if (worker.profession) {
-        where.roleRequired = worker.profession;
-      }
+    } else if (filter.profession || worker.profession) {
+      where.roleRequired = filter.profession || worker.profession;
     }
 
-    return this.prisma.shift.findMany({
+    const shifts = await this.prisma.shift.findMany({
       where,
       orderBy: [{ isEmergency: 'desc' }, { startTime: 'asc' }],
       include: {
         branch: {
-          include: { organization: { select: { id: true, name: true, logoUrl: true } } },
+          select: {
+            id: true, name: true, city: true, postcode: true, organizationId: true,
+            organization: { select: { id: true, name: true, logoUrl: true } },
+          },
         },
         _count: { select: { applications: true } },
       },
+      take: 200,
     });
+
+    const watched = new Set(worker.watchedShifts.map((w) => w.shiftId));
+    const favs = new Set(worker.favouriteBranches.map((f) => f.branchId));
+    return shifts.map((s) => ({ ...s, isWatched: watched.has(s.id), isFavouriteBranch: favs.has(s.branchId) }));
   }
 
-  async findOne(id: string) {
-    const shift = await this.prisma.shift.findUnique({
-      where: { id },
+  /** Worker diary: everything the worker is booked on, applied for, negotiating or watching. */
+  async getWorkerDiary(workerId: string) {
+    const [booked, applications, negotiations, watched] = await Promise.all([
+      this.prisma.shift.findMany({
+        where: { assignedWorkerId: workerId },
+        orderBy: { startTime: 'desc' },
+        include: { branch: { select: { id: true, name: true, city: true } }, timesheet: { select: { id: true, status: true } } },
+        take: 200,
+      }),
+      this.prisma.shiftApplication.findMany({
+        where: { reliefWorkerId: workerId },
+        orderBy: { appliedAt: 'desc' },
+        include: { shift: { include: { branch: { select: { id: true, name: true, city: true } } } } },
+        take: 100,
+      }),
+      this.prisma.shiftNegotiation.findMany({
+        where: { reliefWorkerId: workerId },
+        orderBy: { createdAt: 'desc' },
+        include: { shift: { include: { branch: { select: { id: true, name: true, city: true } } } } },
+        take: 100,
+      }),
+      this.prisma.workerWatchedShift.findMany({
+        where: { reliefWorkerId: workerId },
+        include: { shift: { include: { branch: { select: { id: true, name: true, city: true } } } } },
+        take: 100,
+      }),
+    ]);
+    return { booked, applications, negotiations, watching: watched.map((w) => w.shift) };
+  }
+
+  async findOne(user: AuthUser, id: string) {
+    if (user.role === Role.RELIEF_WORKER) return this.findOneForWorker(user.reliefProfile.id, id);
+
+    const shift = await this.prisma.shift.findFirst({
+      where: { id, branch: this.access.branchScope(user) },
       include: {
-        branch: { include: { organization: true, manager: true } },
-        assignedWorker: {
-          include: { documents: { where: { status: 'VERIFIED' } } },
-        },
-        applications: {
-          include: { reliefWorker: true },
-          orderBy: { appliedAt: 'desc' },
-        },
-        negotiations: {
-          include: { reliefWorker: true },
-          orderBy: { createdAt: 'desc' },
-        },
+        branch: { include: { organization: { select: { id: true, name: true } }, manager: { select: { id: true, email: true } } } },
+        assignedWorker: { include: { documents: { where: { status: 'VERIFIED' } } } },
+        applications: { include: { reliefWorker: true }, orderBy: { appliedAt: 'desc' } },
+        negotiations: { include: { reliefWorker: true }, orderBy: { createdAt: 'desc' } },
         timesheet: true,
       },
     });
@@ -140,23 +254,53 @@ export class ShiftsService {
     return shift;
   }
 
-  async assignWorker(shiftId: string, workerId: string) {
+  private async findOneForWorker(workerId: string, id: string) {
+    const [shift, memberships] = await Promise.all([
+      this.prisma.shift.findUnique({
+        where: { id },
+        include: {
+          branch: { select: { id: true, name: true, city: true, postcode: true, phone: true, organizationId: true, organization: { select: { id: true, name: true, logoUrl: true } } } },
+          applications: { where: { reliefWorkerId: workerId } },
+          negotiations: { where: { reliefWorkerId: workerId }, orderBy: { createdAt: 'desc' } },
+          watchedBy: { where: { reliefWorkerId: workerId } },
+        },
+      }),
+      this.prisma.staffBankMember.findMany({ where: { reliefWorkerId: workerId } }),
+    ]);
+    if (!shift) throw new NotFoundException('Shift not found');
+    const isMine = shift.assignedWorkerId === workerId;
+    const visible =
+      shift.visibility !== ShiftVisibility.STAFF_BANK_ONLY ||
+      memberships.some((m) => m.isActive && m.organizationId === shift.branch.organizationId && (!m.branchId || m.branchId === shift.branchId));
+    if (!isMine && !visible) throw new NotFoundException('Shift not found');
+    const { watchedBy, ...rest } = shift;
+    return { ...rest, isWatched: watchedBy.length > 0 };
+  }
+
+  async assignWorker(user: AuthUser, shiftId: string, dto: AssignWorkerDto) {
+    await this.access.assertShift(user, shiftId);
+    const canOverride = user.role === Role.ORG_ADMIN || user.role === Role.SUPER_ADMIN;
+    if (dto.overrideSkills && !canOverride) {
+      throw new ForbiddenException('Only organization admins can override skill requirements');
+    }
+    return this.book(shiftId, dto.reliefWorkerId, { asManager: true, skipSkills: !!dto.overrideSkills });
+  }
+
+  async instantBook(shiftId: string, workerId: string) {
+    const shift = await this.prisma.shift.findUnique({ where: { id: shiftId } });
+    if (!shift) throw new NotFoundException('Shift not found');
+    if (!shift.instantBookEnabled) throw new BadRequestException('Instant booking is not enabled for this shift');
+    return this.book(shiftId, workerId, {});
+  }
+
+  /** Atomic booking: eligibility, overlap check and a conditional status flip in one transaction. */
+  private book(shiftId: string, workerId: string, opts: { asManager?: boolean; skipSkills?: boolean }) {
     return this.prisma.$transaction(async (tx) => {
-      const shift = await tx.shift.findUnique({ where: { id: shiftId } });
-      if (!shift) throw new NotFoundException('Shift not found');
+      await lockWorker(tx, workerId);
+      const { shift } = await assertWorkerCanBook(tx, shiftId, workerId, opts);
+      assertShiftBookable(shift.status);
+      if (shift.startTime.getTime() < Date.now()) throw new BadRequestException('Shift has already started');
 
-      // Atomic verification of shift status
-      if (shift.status === ShiftStatus.BOOKED || shift.status === ShiftStatus.COMPLETED) {
-        throw new ConflictException('Shift has already been filled');
-      }
-
-      const worker = await tx.reliefProfile.findUnique({
-        where: { id: workerId },
-        include: { documents: true },
-      });
-      if (!worker) throw new NotFoundException('Worker not found');
-
-      // Anti double-booking validation inside atomic transaction
       const overlap = await tx.shift.findFirst({
         where: {
           assignedWorkerId: workerId,
@@ -166,94 +310,51 @@ export class ShiftsService {
           endTime: { gt: shift.startTime },
         },
       });
-
       if (overlap) {
         throw new ConflictException(
           `Worker already has a conflicting shift booking from ${overlap.startTime.toISOString()} to ${overlap.endTime.toISOString()}`,
         );
       }
 
-      // Conditional atomic update
-      const updateResult = await tx.shift.updateMany({
-        where: {
-          id: shiftId,
-          status: { in: [ShiftStatus.OPEN, ShiftStatus.IN_NEGOTIATION] },
-        },
-        data: {
-          assignedWorkerId: workerId,
-          status: ShiftStatus.BOOKED,
-        },
+      const res = await tx.shift.updateMany({
+        where: { id: shiftId, status: { in: [ShiftStatus.OPEN, ShiftStatus.IN_NEGOTIATION] } },
+        data: { assignedWorkerId: workerId, status: ShiftStatus.BOOKED },
       });
+      if (res.count === 0) throw new ConflictException('Shift has already been booked by another process');
 
-      if (updateResult.count === 0) {
-        throw new ConflictException('Shift has already been booked by another process');
-      }
-
-      // Automatically resolve other pending applications & negotiations
       await tx.shiftApplication.updateMany({
-        where: {
-          shiftId,
-          reliefWorkerId: { not: workerId },
-          status: ApplicationStatus.APPLIED,
-        },
-        data: { status: ApplicationStatus.REJECTED },
+        where: { shiftId, reliefWorkerId: workerId, status: ApplicationStatus.APPLIED },
+        data: { status: ApplicationStatus.ACCEPTED, reviewedAt: new Date() },
       });
-
+      await tx.shiftApplication.updateMany({
+        where: { shiftId, reliefWorkerId: { not: workerId }, status: ApplicationStatus.APPLIED },
+        data: { status: ApplicationStatus.REJECTED, reviewedAt: new Date() },
+      });
       await tx.shiftNegotiation.updateMany({
-        where: {
-          shiftId,
-          reliefWorkerId: { not: workerId },
-          status: NegotiationStatus.PENDING,
-        },
+        where: { shiftId, status: { in: [NegotiationStatus.PENDING, NegotiationStatus.COUNTERED] } },
         data: { status: NegotiationStatus.REJECTED },
       });
 
-      return tx.shift.findUnique({
-        where: { id: shiftId },
-        include: { assignedWorker: true, branch: true },
-      });
+      return tx.shift.findUnique({ where: { id: shiftId }, include: { assignedWorker: true, branch: true } });
     });
   }
 
-  async instantBook(shiftId: string, workerId: string) {
-    const shift = await this.prisma.shift.findUnique({ where: { id: shiftId } });
-    if (!shift) throw new NotFoundException('Shift not found');
-    if (!shift.instantBookEnabled) {
-      throw new BadRequestException('Instant booking is not enabled for this shift');
-    }
-    if (shift.status !== ShiftStatus.OPEN) {
-      throw new BadRequestException('Shift is no longer open for booking');
-    }
-
-    const worker = await this.prisma.reliefProfile.findUnique({ where: { id: workerId } });
-    if (!worker || !worker.isVerified) {
-      throw new BadRequestException('Full compliance verification is required for Instant Booking');
-    }
-
-    return this.assignWorker(shiftId, workerId);
-  }
-
-  async applyForShift(shiftId: string, workerId: string, notes?: string) {
-    const shift = await this.prisma.shift.findUnique({ where: { id: shiftId } });
-    if (!shift || shift.status !== ShiftStatus.OPEN) {
-      throw new BadRequestException('Shift is not open for applications');
-    }
-
-    const existing = await this.prisma.shiftApplication.findUnique({
-      where: { shiftId_reliefWorkerId: { shiftId, reliefWorkerId: workerId } },
-    });
-    if (existing) {
-      throw new BadRequestException('You have already applied for this shift');
-    }
-
-    return this.prisma.shiftApplication.create({
-      data: {
-        shiftId,
-        reliefWorkerId: workerId,
-        status: ApplicationStatus.APPLIED,
-        notes,
-      },
-      include: { shift: { include: { branch: true } } },
+  async applyForShift(shiftId: string, workerId: string, dto: ApplyDto) {
+    return this.prisma.$transaction(async (tx) => {
+      const { shift } = await assertWorkerCanBook(tx, shiftId, workerId);
+      if (shift.status !== ShiftStatus.OPEN) throw new BadRequestException('Shift is not open for applications');
+      if (shift.startTime.getTime() < Date.now()) throw new BadRequestException('Shift has already started');
+      try {
+        return await tx.shiftApplication.create({
+          data: { shiftId, reliefWorkerId: workerId, status: ApplicationStatus.APPLIED, notes: dto.notes },
+          include: { shift: { include: { branch: true } } },
+        });
+      } catch (e) {
+        if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
+          throw new BadRequestException('You have already applied for this shift');
+        }
+        throw e;
+      }
     });
   }
 }

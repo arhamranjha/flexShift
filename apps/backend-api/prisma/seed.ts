@@ -3,6 +3,12 @@ import * as bcrypt from 'bcryptjs';
 
 const prisma = new PrismaClient();
 
+const inDays = (n: number) => {
+  const d = new Date();
+  d.setDate(d.getDate() + n);
+  return d;
+};
+
 async function main() {
   console.log('Seeding FlexShift database with enterprise data...');
 
@@ -45,6 +51,12 @@ async function main() {
       role: Role.ORG_ADMIN,
       organizationId: apexHealth.id,
     },
+  });
+
+  await prisma.user.upsert({
+    where: { email: 'super@flexshift.io' },
+    update: {},
+    create: { email: 'super@flexshift.io', passwordHash: defaultPasswordHash, role: Role.SUPER_ADMIN },
   });
 
   const managerRichmond = await prisma.user.upsert({
@@ -189,7 +201,10 @@ async function main() {
     },
   });
 
-  // 5. Compliance Documents for Sarah
+  // 5. Compliance Documents (reset so reseeding keeps expiry dates fresh)
+  await prisma.complianceDocument.deleteMany({
+    where: { reliefWorkerId: { in: [worker1Profile.id, worker2Profile.id] } },
+  });
   await prisma.complianceDocument.createMany({
     data: [
       {
@@ -198,7 +213,7 @@ async function main() {
         documentReference: 'UK-PASSPORT-549102',
         fileUrl: 'https://docs.flexshift.internal/sarah-id.pdf',
         issueDate: new Date('2022-01-10'),
-        expiresAt: new Date('2032-01-10'),
+        expiresAt: inDays(2000),
         status: DocStatus.VERIFIED,
         verifiedAt: new Date(),
         verifiedById: orgAdmin.id,
@@ -209,7 +224,7 @@ async function main() {
         documentReference: 'RTW-SHARE-782190',
         fileUrl: 'https://docs.flexshift.internal/sarah-rtw.pdf',
         issueDate: new Date('2023-01-01'),
-        expiresAt: new Date('2028-01-01'),
+        expiresAt: inDays(800),
         status: DocStatus.VERIFIED,
         verifiedAt: new Date(),
         verifiedById: orgAdmin.id,
@@ -219,8 +234,8 @@ async function main() {
         type: DocType.DBS_POLICE_CHECK,
         documentReference: 'DBS-ENH-00192847',
         fileUrl: 'https://docs.flexshift.internal/sarah-dbs.pdf',
-        issueDate: new Date('2023-05-15'),
-        expiresAt: new Date('2026-05-15'),
+        issueDate: inDays(-300),
+        expiresAt: inDays(365),
         status: DocStatus.VERIFIED,
         verifiedAt: new Date(),
         verifiedById: orgAdmin.id,
@@ -231,13 +246,40 @@ async function main() {
         documentReference: 'PDA-INDEMNITY-2024',
         fileUrl: 'https://docs.flexshift.internal/sarah-indemnity.pdf',
         issueDate: new Date('2024-01-01'),
-        expiresAt: new Date('2027-01-01'),
+        expiresAt: inDays(400),
         status: DocStatus.VERIFIED,
         verifiedAt: new Date(),
         verifiedById: orgAdmin.id,
       },
     ],
     skipDuplicates: true,
+  });
+
+  await prisma.complianceDocument.createMany({
+    data: [DocType.IDENTITY, DocType.RIGHT_TO_WORK, DocType.DBS_POLICE_CHECK, DocType.INDEMNITY_INSURANCE].map((type) => ({
+      reliefWorkerId: worker2Profile.id,
+      type,
+      documentReference: `DAVID-${type}`,
+      fileUrl: `seed/david-${type.toLowerCase()}.pdf`,
+      issueDate: inDays(-200),
+      expiresAt: inDays(500),
+      status: DocStatus.VERIFIED,
+      verifiedAt: new Date(),
+      verifiedById: orgAdmin.id,
+    })),
+  });
+
+  // A pending document so the compliance desk has something to review
+  await prisma.complianceDocument.create({
+    data: {
+      reliefWorkerId: worker2Profile.id,
+      type: DocType.SAFEGUARDING_L3,
+      documentReference: 'SG3-2026-11',
+      fileUrl: 'seed/david-safeguarding.pdf',
+      issueDate: inDays(-10),
+      expiresAt: inDays(1000),
+      status: DocStatus.PENDING,
+    },
   });
 
   // 6. Staff Bank Membership
@@ -259,7 +301,8 @@ async function main() {
     },
   });
 
-  // 7. Shifts
+  // 7. Shifts (reset so reseeding does not duplicate rota data)
+  await prisma.shift.deleteMany({});
   const tomorrow = new Date();
   tomorrow.setDate(tomorrow.getDate() + 1);
   tomorrow.setHours(9, 0, 0, 0);
@@ -313,8 +356,38 @@ async function main() {
     },
   });
 
+  const atTime = (days: number, h: number, m = 0) => {
+    const d = inDays(days);
+    d.setHours(h, m, 0, 0);
+    return d;
+  };
+  const extraShifts = [
+    { branchId: richmondBranch.id, title: 'Staff Bank Pharmacist (Weekday)', start: atTime(2, 9), end: atTime(2, 17), rate: 31, visibility: ShiftVisibility.STAFF_BANK_ONLY, systems: ['ProScript'], accr: ['CPCS'] },
+    { branchId: barkingBranch.id, title: 'Open Marketplace Relief Pharmacist', start: atTime(6, 9), end: atTime(6, 18), rate: 34, visibility: ShiftVisibility.PUBLIC_MARKETPLACE, systems: ['ProScript'], accr: ['CPCS'] },
+    { branchId: beckenhamBranch.id, title: 'Saturday Dispensary Cover', start: atTime(8, 9), end: atTime(8, 13), rate: 30, visibility: ShiftVisibility.PUBLIC_MARKETPLACE, systems: [], accr: [] },
+  ];
+  for (const e of extraShifts) {
+    const hours = (e.end.getTime() - e.start.getTime()) / 3_600_000;
+    await prisma.shift.create({
+      data: {
+        branchId: e.branchId,
+        title: e.title,
+        roleRequired: 'Pharmacist',
+        startTime: e.start,
+        endTime: e.end,
+        hourlyRate: e.rate,
+        totalEstimatedPay: Number((hours * e.rate).toFixed(2)),
+        requiredSystems: e.systems,
+        requiredAccreditations: e.accr,
+        visibility: e.visibility,
+        status: ShiftStatus.OPEN,
+      },
+    });
+  }
+
   console.log('FlexShift database seeded successfully!');
   console.log('Demo Credentials:');
+  console.log('- Super Admin: super@flexshift.io / FlexShiftPass2026!');
   console.log('- Super / Org Admin: admin@apexhealth.co.uk / FlexShiftPass2026!');
   console.log('- Facility Manager: richmond.mgr@apexhealth.co.uk / FlexShiftPass2026!');
   console.log('- Relief Worker: sarah.y@flexrelief.co.uk / FlexShiftPass2026!');

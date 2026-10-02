@@ -155,6 +155,8 @@ model User {
   passwordHash   String
   role           Role
   isActive       Boolean               @default(true)
+  mustChangePassword Boolean           @default(false)
+  tokenVersion   Int                   @default(0)
   lastLoginAt    DateTime?
   createdAt      DateTime              @default(now())
   updatedAt      DateTime              @updatedAt
@@ -186,6 +188,7 @@ model ReliefProfile {
   systemTags               String[]                // e.g. ["ProScript", "Columbus", "Nexphase"]
   accreditations           String[]                // e.g. ["CPCS", "Flu Vaccination", "Safeguarding L3", "NMS"]
   isVerified               Boolean                 @default(false)
+  createdByOrganizationId  String?                 // set for admin-led concierge onboarding
   createdAt                DateTime                @default(now())
   updatedAt                DateTime                @updatedAt
 

@@ -1,7 +1,14 @@
 import { Module } from '@nestjs/common';
+import { APP_FILTER, APP_GUARD } from '@nestjs/core';
 import { ConfigModule } from '@nestjs/config';
+import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { PrismaModule } from './prisma/prisma.module';
+import { CommonModule } from './common/common.module';
+import { StorageModule } from './storage/storage.module';
+import { validateEnv } from './common/env';
+import { PrismaExceptionFilter } from './common/prisma-exception.filter';
 import { AuthModule } from './auth/auth.module';
+import { UsersModule } from './users/users.module';
 import { OrganizationsModule } from './organizations/organizations.module';
 import { BranchesModule } from './branches/branches.module';
 import { ReliefWorkersModule } from './relief-workers/relief-workers.module';
@@ -11,12 +18,17 @@ import { NegotiationsModule } from './negotiations/negotiations.module';
 import { TimesheetsModule } from './timesheets/timesheets.module';
 import { InvoicesModule } from './invoices/invoices.module';
 import { LeaveModule } from './leave/leave.module';
+import { AnalyticsModule } from './analytics/analytics.module';
 
 @Module({
   imports: [
-    ConfigModule.forRoot({ isGlobal: true }),
+    ConfigModule.forRoot({ isGlobal: true, validate: validateEnv }),
+    ThrottlerModule.forRoot([{ ttl: 60_000, limit: Number(process.env.THROTTLE_LIMIT) || 300 }]),
     PrismaModule,
+    CommonModule,
+    StorageModule,
     AuthModule,
+    UsersModule,
     OrganizationsModule,
     BranchesModule,
     ReliefWorkersModule,
@@ -26,6 +38,11 @@ import { LeaveModule } from './leave/leave.module';
     TimesheetsModule,
     InvoicesModule,
     LeaveModule,
+    AnalyticsModule,
+  ],
+  providers: [
+    { provide: APP_GUARD, useClass: ThrottlerGuard },
+    { provide: APP_FILTER, useClass: PrismaExceptionFilter },
   ],
 })
 export class AppModule {}

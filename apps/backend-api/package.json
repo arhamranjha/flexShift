@@ -5,9 +5,12 @@
   "scripts": {
     "build": "tsc",
     "start": "node dist/main.js",
-    "start:dev": "ts-node src/main.ts",
+    "start:dev": "ts-node-dev --respawn --transpile-only src/main.ts",
     "prisma:generate": "prisma generate",
-    "prisma:migrate": "prisma migrate dev"
+    "prisma:migrate": "prisma migrate dev",
+    "test": "jest --runInBand",
+    "seed": "ts-node prisma/seed.ts",
+    "lint": "tsc --noEmit -p ."
   },
   "dependencies": {
     "@nestjs/common": "^10.3.8",
@@ -17,23 +20,52 @@
     "@nestjs/passport": "^10.0.3",
     "@nestjs/platform-express": "^10.3.8",
     "@nestjs/swagger": "^7.3.1",
+    "@nestjs/throttler": "^5.2.0",
     "@prisma/client": "^5.14.0",
     "@types/bcryptjs": "^2.4.6",
     "bcrypt": "^5.1.1",
     "bcryptjs": "^3.0.3",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.1",
+    "helmet": "^8.3.0",
     "passport": "^0.7.0",
     "passport-jwt": "^4.0.1",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1"
   },
   "devDependencies": {
+    "@nestjs/testing": "^10.4.22",
     "@types/bcrypt": "^5.0.2",
+    "@types/jest": "^30.0.0",
+    "@types/multer": "^2.3.0",
     "@types/node": "^20.12.12",
     "@types/passport-jwt": "^4.0.1",
+    "@types/supertest": "^7.2.1",
+    "jest": "^30.5.2",
     "prisma": "^5.14.0",
+    "supertest": "^7.3.1",
+    "ts-jest": "^29.4.14",
     "ts-node": "^10.9.2",
+    "ts-node-dev": "^2.0.0",
     "typescript": "^5.4.5"
+  },
+  "jest": {
+    "preset": "ts-jest",
+    "testEnvironment": "node",
+    "rootDir": ".",
+    "testRegex": "test/.*\\.e2e-spec\\.ts$",
+    "setupFiles": [
+      "<rootDir>/test/test-env.ts"
+    ],
+    "globalSetup": "<rootDir>/test/global-setup.ts",
+    "testTimeout": 30000,
+    "transform": {
+      "^.+\\.ts$": [
+        "ts-jest",
+        {
+          "diagnostics": false
+        }
+      ]
+    }
   }
 }

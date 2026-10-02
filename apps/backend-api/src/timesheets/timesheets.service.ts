@@ -1,19 +1,24 @@
-import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
+import { Injectable, BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { TimesheetStatus, InvoiceStatus, ShiftStatus } from '@prisma/client';
+import { randomBytes } from 'crypto';
+import { AccessService, AuthUser } from '../common/access.service';
+import { SubmitTimesheetDto } from './dto/timesheet.dto';
+
+const MINUTE = 60_000;
+/** Clock-in may be up to 1h before the shift starts; clock-out up to 4h after it ends. */
+const EARLY_CLOCK_IN = 60 * MINUTE;
+const LATE_CLOCK_OUT = 4 * 60 * MINUTE;
 
 @Injectable()
 export class TimesheetsService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private access: AccessService,
+  ) {}
 
-  async submitTimesheet(data: {
-    shiftId: string;
-    reliefWorkerId: string;
-    clockInTime: string | Date;
-    clockOutTime: string | Date;
-    breakMinutes?: number;
-    notes?: string;
-  }) {
+  async submitTimesheet(reliefWorkerId: string, dto: SubmitTimesheetDto) {
+    const data = { ...dto, reliefWorkerId };
     const shift = await this.prisma.shift.findUnique({
       where: { id: data.shiftId },
       include: { branch: true },
@@ -37,9 +42,20 @@ export class TimesheetsService {
       );
     }
 
+    if (shift.status !== ShiftStatus.BOOKED && shift.status !== ShiftStatus.IN_PROGRESS) {
+      throw new BadRequestException(`Timesheets cannot be submitted for a ${shift.status} shift`);
+    }
+
     const clockIn = new Date(data.clockInTime);
     const clockOut = new Date(data.clockOutTime);
     const breakMins = data.breakMinutes || 0;
+    if (clockOut.getTime() > Date.now()) throw new BadRequestException('Clock-out time cannot be in the future');
+    if (clockIn.getTime() < shift.startTime.getTime() - EARLY_CLOCK_IN) {
+      throw new BadRequestException('Clock-in is more than 1 hour before the shift start');
+    }
+    if (clockOut.getTime() > shift.endTime.getTime() + LATE_CLOCK_OUT) {
+      throw new BadRequestException('Clock-out is more than 4 hours after the shift end');
+    }
 
     const totalMinutes = (clockOut.getTime() - clockIn.getTime()) / (1000 * 60) - breakMins;
     if (totalMinutes <= 0) {
@@ -50,63 +66,70 @@ export class TimesheetsService {
     const hourlyRateApplied = Number(shift.hourlyRate);
     const totalPayout = Number((billableHours * hourlyRateApplied).toFixed(2));
 
-    return this.prisma.timesheet.upsert({
-      where: { shiftId: data.shiftId },
-      create: {
-        shiftId: data.shiftId,
-        reliefWorkerId: data.reliefWorkerId,
-        branchId: shift.branchId,
-        clockInTime: clockIn,
-        clockOutTime: clockOut,
-        breakMinutes: breakMins,
-        billableHours,
-        hourlyRateApplied,
-        totalPayout,
-        notes: data.notes,
-        status: TimesheetStatus.SUBMITTED,
-      },
-      update: {
-        clockInTime: clockIn,
-        clockOutTime: clockOut,
-        breakMinutes: breakMins,
-        billableHours,
-        hourlyRateApplied,
-        totalPayout,
-        notes: data.notes,
-        status: TimesheetStatus.SUBMITTED,
-      },
+    const values = {
+      clockInTime: clockIn,
+      clockOutTime: clockOut,
+      breakMinutes: breakMins,
+      billableHours,
+      hourlyRateApplied,
+      totalPayout,
+      notes: data.notes,
+      status: TimesheetStatus.SUBMITTED,
+    };
+
+    // Re-submission is only allowed while the timesheet is still open; the status guard is part of
+    // the UPDATE so a concurrent approval cannot be overwritten. First submission relies on the
+    // unique shiftId (a racing duplicate surfaces as 409).
+    if (existingTs) {
+      const res = await this.prisma.timesheet.updateMany({
+        where: { shiftId: data.shiftId, status: { in: [TimesheetStatus.SUBMITTED, TimesheetStatus.PENDING_SUBMISSION, TimesheetStatus.DISPUTED] } },
+        data: values,
+      });
+      if (res.count === 0) throw new ConflictException('Timesheet was already processed');
+      return this.prisma.timesheet.findUnique({ where: { shiftId: data.shiftId }, include: { shift: true, branch: true } });
+    }
+    return this.prisma.timesheet.create({
+      data: { shiftId: data.shiftId, reliefWorkerId: data.reliefWorkerId, branchId: shift.branchId, ...values },
       include: { shift: true, branch: true },
     });
   }
 
-  async approveTimesheet(timesheetId: string, approverUserId: string) {
-    const ts = await this.prisma.timesheet.findUnique({
-      where: { id: timesheetId },
+  async approveTimesheet(timesheetId: string, user: AuthUser) {
+    const approverUserId = user.id;
+    const ts = await this.prisma.timesheet.findFirst({
+      where: { id: timesheetId, branch: this.access.branchScope(user) },
       include: { branch: true, shift: true },
     });
     if (!ts) throw new NotFoundException('Timesheet not found');
-    if (ts.status === TimesheetStatus.APPROVED || ts.status === TimesheetStatus.SETTLED) {
-      throw new BadRequestException('Timesheet is already approved');
+    if (ts.status !== TimesheetStatus.SUBMITTED) {
+      throw new BadRequestException(`Only submitted timesheets can be approved (current: ${ts.status})`);
     }
 
     return this.prisma.$transaction(async (tx) => {
-      const updatedTs = await tx.timesheet.update({
-        where: { id: timesheetId },
+      const res = await tx.timesheet.updateMany({
+        where: { id: timesheetId, status: TimesheetStatus.SUBMITTED },
         data: {
           status: TimesheetStatus.APPROVED,
           approvedAt: new Date(),
           approvedById: approverUserId,
         },
       });
+      if (res.count === 0) throw new ConflictException('Timesheet was already processed');
+      const updatedTs = await tx.timesheet.findUniqueOrThrow({ where: { id: timesheetId } });
 
-      // Update shift status to COMPLETED
-      await tx.shift.update({
-        where: { id: ts.shiftId },
+      // The shift must still be held by this worker (a released/cancelled shift cannot be paid out).
+      const shiftRes = await tx.shift.updateMany({
+        where: {
+          id: ts.shiftId,
+          assignedWorkerId: ts.reliefWorkerId,
+          status: { in: [ShiftStatus.BOOKED, ShiftStatus.IN_PROGRESS] },
+        },
         data: { status: ShiftStatus.COMPLETED },
       });
+      if (shiftRes.count === 0) throw new ConflictException('This shift is no longer assigned to the worker');
 
       // Auto-generate digital invoice
-      const invoiceNumber = `INV-${Date.now().toString().slice(-6)}-${Math.floor(100 + Math.random() * 900)}`;
+      const invoiceNumber = `INV-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${randomBytes(3).toString('hex').toUpperCase()}`;
       const dueDate = new Date();
       dueDate.setDate(dueDate.getDate() + 14); // 14-day net terms
 
@@ -126,7 +149,8 @@ export class TimesheetsService {
     });
   }
 
-  async findByBranch(branchId: string, status?: TimesheetStatus) {
+  async findByBranch(user: AuthUser, branchId: string, status?: TimesheetStatus) {
+    await this.access.assertBranch(user, branchId);
     return this.prisma.timesheet.findMany({
       where: {
         branchId,

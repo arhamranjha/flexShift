@@ -12,3 +12,4 @@ out/
 *.mp4
 *.m4v
 coverage/
+uploads/

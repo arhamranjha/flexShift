@@ -1,19 +1,32 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { InvoiceStatus } from '@prisma/client';
+import { AccessService, AuthUser } from '../common/access.service';
+
+const csvCell = (v: unknown) => {
+  let s = String(v ?? '');
+  // Neutralise spreadsheet formula injection, then quote.
+  if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`;
+  return `"${s.replace(/"/g, '""')}"`;
+};
 
 @Injectable()
 export class InvoicesService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private access: AccessService,
+  ) {}
 
-  async findByOrganization(organizationId: string) {
+  async findByOrganization(user: AuthUser, organizationId: string, status?: InvoiceStatus) {
+    this.access.assertOrg(user, organizationId);
     return this.prisma.invoice.findMany({
-      where: { organizationId },
+      where: { organizationId, ...(status ? { status } : {}) },
       include: {
         reliefWorker: { select: { id: true, firstName: true, lastName: true, registrationNumber: true } },
         timesheet: { include: { branch: { select: { name: true, branchCode: true } } } },
       },
       orderBy: { issuedAt: 'desc' },
+      take: 500,
     });
   }
 
@@ -27,32 +40,46 @@ export class InvoicesService {
       orderBy: { issuedAt: 'desc' },
     });
 
-    const totalEarned = invoices
-      .filter((i) => i.status === InvoiceStatus.PAID)
-      .reduce((sum, i) => sum + Number(i.totalAmount), 0);
+    const sum = (status: InvoiceStatus) =>
+      invoices.filter((i) => i.status === status).reduce((acc, i) => acc + Number(i.totalAmount), 0);
 
-    const pendingPayout = invoices
-      .filter((i) => i.status === InvoiceStatus.ISSUED)
-      .reduce((sum, i) => sum + Number(i.totalAmount), 0);
-
-    return {
-      totalEarned,
-      pendingPayout,
-      invoices,
-    };
+    return { totalEarned: sum(InvoiceStatus.PAID), pendingPayout: sum(InvoiceStatus.ISSUED), invoices };
   }
 
-  async markPaid(id: string, paymentReference: string) {
+  async markPaid(user: AuthUser, id: string, paymentReference: string) {
     const invoice = await this.prisma.invoice.findUnique({ where: { id } });
     if (!invoice) throw new NotFoundException('Invoice not found');
+    this.access.assertOrg(user, invoice.organizationId);
+    if (invoice.status !== InvoiceStatus.ISSUED) {
+      throw new BadRequestException(`Only issued invoices can be marked as paid (current: ${invoice.status})`);
+    }
 
-    return this.prisma.invoice.update({
-      where: { id },
-      data: {
-        status: InvoiceStatus.PAID,
-        paidAt: new Date(),
-        paymentReference,
-      },
+    const res = await this.prisma.invoice.updateMany({
+      where: { id, status: InvoiceStatus.ISSUED },
+      data: { status: InvoiceStatus.PAID, paidAt: new Date(), paymentReference },
     });
+    if (res.count === 0) throw new BadRequestException('Invoice was already processed');
+    await this.prisma.timesheet.updateMany({
+      where: { id: invoice.timesheetId ?? '', status: 'APPROVED' },
+      data: { status: 'SETTLED' },
+    });
+    return this.prisma.invoice.findUnique({ where: { id } });
+  }
+
+  /** Payment batch for a finance team / BACS bulk upload (bank details are collected outside the platform). */
+  async exportPaymentBatch(user: AuthUser, organizationId: string, status: InvoiceStatus = InvoiceStatus.ISSUED) {
+    const invoices = await this.findByOrganization(user, organizationId, status);
+    const header = ['Invoice', 'Payee', 'Registration', 'Branch', 'Amount', 'Currency', 'Issued', 'Due'];
+    const rows = invoices.map((i) => [
+      i.invoiceNumber,
+      `${i.reliefWorker.firstName} ${i.reliefWorker.lastName}`,
+      i.reliefWorker.registrationNumber,
+      i.timesheet?.branch?.name ?? '',
+      Number(i.totalAmount).toFixed(2),
+      i.currency,
+      i.issuedAt.toISOString().slice(0, 10),
+      i.dueAt ? i.dueAt.toISOString().slice(0, 10) : '',
+    ]);
+    return [header, ...rows].map((r) => r.map(csvCell).join(',')).join('\r\n') + '\r\n';
   }
 }
