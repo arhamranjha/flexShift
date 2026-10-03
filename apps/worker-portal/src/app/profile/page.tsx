@@ -1,7 +1,7 @@
 'use client';
 
 import { Badge, Button, Card, ErrorBlock, Field, Input, LoadingBlock, Modal, Select, StatusBadge, Textarea, label, useAction, useAsync } from '@flexshift/ui';
-import type { ComplianceDocument, DocType, ReliefProfile } from '@flexshift/api-client';
+import { DOCUMENT_ACCEPT, DOCUMENT_TYPES_LABEL, documentFileProblem, normalizeDocumentFile, type ComplianceDocument, type DocType, type ReliefProfile } from '@flexshift/api-client';
 import { AlertTriangle, BadgeCheck, CheckCircle2, Circle, LogOut, Upload } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { ACCREDITATIONS, Chips, PageTitle, SYSTEMS } from '@/components/common';
@@ -10,8 +10,6 @@ import { api, useAuth } from '@/lib/auth';
 const MANDATORY: DocType[] = ['IDENTITY', 'RIGHT_TO_WORK', 'DBS_POLICE_CHECK', 'INDEMNITY_INSURANCE'];
 const OPTIONAL: DocType[] = ['SAFEGUARDING_L3', 'PRACTICE_DECLARATION', 'MANDATORY_TRAINING', 'OTHER'];
 const ALL_TYPES = [...MANDATORY, ...OPTIONAL];
-const MAX_BYTES = 10 * 1024 * 1024;
-const ALLOWED = ['application/pdf', 'image/png', 'image/jpeg'];
 const DAY = 86_400_000;
 
 export default function ProfilePage() {
@@ -104,7 +102,7 @@ function UploadModal({ profileId, initialType, onClose, onDone }: { profileId: s
   const [issue, setIssue] = useState('');
   const [expires, setExpires] = useState('');
   const [file, setFile] = useState<File | null>(null);
-  const fileErr = file && !ALLOWED.includes(file.type) ? 'File must be a PDF, PNG or JPEG' : file && file.size > MAX_BYTES ? 'File must be 10MB or smaller' : undefined;
+  const fileErr = file ? documentFileProblem(file) : undefined;
   const dateErr = issue && expires && expires < issue ? 'Expiry must be after the issue date' : undefined;
 
   async function submit() {
@@ -114,7 +112,7 @@ function UploadModal({ profileId, initialType, onClose, onDone }: { profileId: s
     if (ref.trim()) fd.append('documentReference', ref.trim());
     if (issue) fd.append('issueDate', issue);
     if (expires) fd.append('expiresAt', expires);
-    fd.append('file', file);
+    fd.append('file', normalizeDocumentFile(file));
     if (await run(() => api.workers.uploadDocument(profileId, fd), 'Document uploaded for review')) onDone();
   }
 
@@ -127,8 +125,8 @@ function UploadModal({ profileId, initialType, onClose, onDone }: { profileId: s
         <Field label="Issue date"><Input type="date" className="min-h-[44px] text-base" value={issue} onChange={(e) => setIssue(e.target.value)} /></Field>
         <Field label="Expiry date" error={dateErr}><Input type="date" className="min-h-[44px] text-base" value={expires} onChange={(e) => setExpires(e.target.value)} /></Field>
       </div>
-      <Field label="File" hint="PDF, PNG or JPEG, up to 10MB" error={fileErr}>
-        <input type="file" accept="application/pdf,image/png,image/jpeg" onChange={(e) => setFile(e.target.files?.[0] ?? null)} className="block w-full text-sm file:mr-3 file:min-h-[44px] file:px-4 file:rounded-lg file:border-0 file:bg-emerald-50 file:text-emerald-700 file:font-semibold" />
+      <Field label="File" hint={`${DOCUMENT_TYPES_LABEL}, up to 10MB`} error={fileErr}>
+        <input type="file" accept={DOCUMENT_ACCEPT} onChange={(e) => setFile(e.target.files?.[0] ?? null)} className="block w-full text-sm file:mr-3 file:min-h-[44px] file:px-4 file:rounded-lg file:border-0 file:bg-emerald-50 file:text-emerald-700 file:font-semibold" />
       </Field>
     </Modal>
   );

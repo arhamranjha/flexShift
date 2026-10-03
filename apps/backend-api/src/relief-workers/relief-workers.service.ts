@@ -2,6 +2,7 @@ import { Injectable, NotFoundException, BadRequestException, ConflictException }
 import { PrismaService } from '../prisma/prisma.service';
 import { DocStatus, Prisma, Role } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
+import { extname } from 'path';
 import { AccessService, AuthUser } from '../common/access.service';
 import { StorageService } from '../storage/storage.service';
 import { isVisibleToWorker } from '../shifts/eligibility';
@@ -12,17 +13,18 @@ import {
   ConciergeWorkerDto, DocumentQueueQueryDto, UpdatePreferencesDto, UploadDocumentDto, VerifyDocumentDto, WorkerQueryDto,
 } from './dto/relief-worker.dto';
 
-/** Checks the file's magic bytes against its declared type (the client-supplied mimetype is not trusted). */
-function assertFileSignature(file: { buffer: Buffer; originalname: string; mimetype: string }) {
+/**
+ * The file's extension says what it claims to be and its first bytes must agree. The browser-reported mimetype is
+ * ignored: it comes from the user's OS registry and can be blank or wrong for perfectly good files.
+ */
+function assertFileSignature(file: { buffer: Buffer; originalname: string }) {
+  const ext = extname(file.originalname).toLowerCase();
   const b = file.buffer;
-  const isPdf = b.subarray(0, 5).toString('latin1') === '%PDF-';
-  const isPng = b.subarray(0, 4).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47]));
-  const isJpg = b.subarray(0, 3).equals(Buffer.from([0xff, 0xd8, 0xff]));
   const ok =
-    (file.mimetype === 'application/pdf' && isPdf) ||
-    (file.mimetype === 'image/png' && isPng) ||
-    (file.mimetype === 'image/jpeg' && isJpg);
-  if (!ok) throw new BadRequestException('File content does not match its declared type (PDF, PNG or JPEG only)');
+    (ext === '.pdf' && b.subarray(0, 5).toString('latin1') === '%PDF-') ||
+    (ext === '.png' && b.subarray(0, 4).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47]))) ||
+    ((ext === '.jpg' || ext === '.jpeg') && b.subarray(0, 3).equals(Buffer.from([0xff, 0xd8, 0xff])));
+  if (!ok) throw new BadRequestException('File content does not match its type (PDF, PNG or JPEG only)');
 }
 
 @Injectable()

@@ -975,4 +975,25 @@ describe('automation: cascade, expiry, notifications, checklists, benchmarks', (
     await expect(createOrganization(prisma as any, { ...base, orgName: 'Fourth Org', branchCode: 'F-1', adminEmail: 'bad-email' })).rejects.toThrow(/valid email/);
     expect(await prisma.user.count()).toBe(usersBefore);
   });
+
+  it('accepts documents whatever type the browser reports, and still rejects disguised files', async () => {
+    const PNG = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(32)]);
+    const JPG = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(32)]);
+    const upload = (name: string, body: Buffer, contentType?: string) =>
+      api().post(`/relief-workers/${sarahId}/documents`).set('Authorization', `Bearer ${sarahT}`).field('type', 'OTHER')
+        .attach('file', body, contentType === undefined ? { filename: name } : { filename: name, contentType });
+
+    // Some Windows machines report no type, or a generic one, for perfectly good files
+    await upload('passport.pdf', Buffer.from('%PDF-1.4 x'), 'application/octet-stream').expect(201);
+    await upload('PASSPORT SCAN.PDF', Buffer.from('%PDF-1.4 x'), 'application/x-unknown').expect(201); // upper case, spaces
+    await upload('photo.png', PNG, 'application/octet-stream').expect(201);
+    await upload('photo.JPG', JPG, 'image/pjpeg').expect(201); // legacy MIME some systems report for JPEG
+    await upload('photo.jpeg', JPG, 'image/jpeg').expect(201);
+
+    // The extension and the bytes must agree, whatever the browser claims
+    await upload('fake.pdf', Buffer.from('<html><script>1</script></html>'), 'application/pdf').expect(400);
+    await upload('photo.png', Buffer.from('%PDF-1.4 x'), 'image/png').expect(400); // PDF bytes in a .png
+    await upload('malware.exe', Buffer.from('MZ'), 'application/pdf').expect(400); // wrong extension, right claim
+    await upload('noextension', Buffer.from('%PDF-1.4 x'), 'application/pdf').expect(400);
+  });
 });

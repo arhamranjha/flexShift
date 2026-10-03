@@ -1,6 +1,6 @@
 import { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
-import { ApiError, createApiClient } from '@flexshift/api-client';
+import { ApiError, createApiClient, documentFileProblem, documentMimeType, DOCUMENT_ACCEPT } from '@flexshift/api-client';
 import { AppModule } from '../src/app.module';
 import { configureApp } from '../src/bootstrap';
 
@@ -229,5 +229,28 @@ describe('api-client against the live API', () => {
     expect((await mgr.api.notifications.list()).unread).toBe(0);
     await david.api.auth.logout();
     await expect(david.api.auth.me()).rejects.toMatchObject({ status: 401 });
+  });
+});
+
+describe('document file helpers (shared by both apps)', () => {
+  it('decides the type from the extension, never from the browser-reported type', () => {
+    expect(documentMimeType('Passport.PDF')).toBe('application/pdf');
+    expect(documentMimeType('my scan.v2.jpeg')).toBe('image/jpeg');
+    expect(documentMimeType('photo.JPG')).toBe('image/jpeg');
+    expect(documentMimeType('a.png')).toBe('image/png');
+    expect(documentMimeType('virus.exe')).toBeNull();
+    expect(documentMimeType('noextension')).toBeNull();
+    expect(documentMimeType('archive.pdf.zip')).toBeNull();
+  });
+
+  it('flags only genuinely unusable files', () => {
+    expect(documentFileProblem({ name: 'ok.pdf', size: 1024 })).toBeUndefined();
+    expect(documentFileProblem({ name: 'ok.pdf', size: 11 * 1024 * 1024 })).toMatch(/10MB/);
+    expect(documentFileProblem({ name: 'ok.pdf', size: 0 })).toMatch(/empty/);
+    expect(documentFileProblem({ name: 'ok.docx', size: 10 })).toMatch(/PDF, PNG or JPEG/);
+  });
+
+  it('lists extensions first in the file-dialog filter (what Windows dialogs use)', () => {
+    expect(DOCUMENT_ACCEPT.split(',').slice(0, 4)).toEqual(['.pdf', '.png', '.jpg', '.jpeg']);
   });
 });

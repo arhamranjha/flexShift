@@ -1,6 +1,6 @@
 'use client';
 
-import { type ReliefProfile, type Shift, fmtRange, gbp } from '@flexshift/api-client';
+import { DOCUMENT_ACCEPT, documentFileProblem, normalizeDocumentFile, type ReliefProfile, type Shift, fmtRange, gbp } from '@flexshift/api-client';
 import {
   Badge, Button, Card, EmptyState, ErrorBlock, Field, Input, LoadingBlock, Modal, Select, StatusBadge, th, td, useAction, useAsync,
 } from '@flexshift/ui';
@@ -153,8 +153,8 @@ function UploadModal({ worker, onClose, onDone }: { worker: ReliefProfile | null
   const submit = async () => {
     if (!worker) return;
     if (!file) return setErr('Choose a file.');
-    if (!['application/pdf', 'image/png', 'image/jpeg'].includes(file.type)) return setErr('File must be a PDF, PNG or JPEG.');
-    if (file.size > 10 * 1024 * 1024) return setErr('File must be 10MB or smaller.');
+    const problem = documentFileProblem(file);
+    if (problem) return setErr(`${problem}.`);
     if (!ref.trim() || !issue || !exp) return setErr('Reference, issue date and expiry date are required.');
     if (exp <= issue) return setErr('Expiry must be after the issue date.');
     setErr('');
@@ -163,7 +163,7 @@ function UploadModal({ worker, onClose, onDone }: { worker: ReliefProfile | null
     form.append('documentReference', ref.trim());
     form.append('issueDate', issue);
     form.append('expiresAt', exp);
-    form.append('file', file);
+    form.append('file', normalizeDocumentFile(file));
     const out = await run(() => api.workers.uploadDocument(worker.id, form), 'Document uploaded for review');
     if (out) { onClose(); onDone(); }
   };
@@ -184,7 +184,7 @@ function UploadModal({ worker, onClose, onDone }: { worker: ReliefProfile | null
         <Field label="Expiry date"><Input type="date" value={exp} onChange={(e) => setExp(e.target.value)} /></Field>
       </div>
       <Field label="File" hint="PDF, PNG or JPEG, up to 10MB.">
-        <Input type="file" accept="application/pdf,image/png,image/jpeg" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
+        <Input type="file" accept={DOCUMENT_ACCEPT} onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
       </Field>
       {err && <p className="text-xs text-rose-600">{err}</p>}
     </Modal>
