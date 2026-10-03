@@ -80,6 +80,10 @@ try {
     const bad = await fetch(`${API}/auth/login`, { method: 'OPTIONS', headers: { Origin: 'https://evil.example', 'Access-Control-Request-Method': 'POST' } });
     assert(!bad.headers.get('access-control-allow-origin'), 'foreign origin was allowed');
   });
+  await step('markets are public and New Zealand is the default', async () => {
+    const m = await (await fetch(`${API}/markets`)).json();
+    assert(m.default === 'NZ' && m.markets.some((x) => x.code === 'NZ' && x.currency === 'NZD'), 'NZ market missing');
+  });
   await step('security headers present on the frontends', async () => {
     for (const u of [`${APP}/login`, `${WORK}/login`]) {
       const r = await fetch(u);
@@ -99,6 +103,7 @@ try {
   shift = await step('manager posts a public instant-book shift starting in two minutes', async () => {
     const start = new Date(Date.now() + 2 * 60_000);
     const s = await manager.post('/shifts', { branchId, title: TITLE, startTime: start.toISOString(), endTime: new Date(start.getTime() + 3 * 3600_000).toISOString(), hourlyRate: 35, visibility: 'PUBLIC_MARKETPLACE', instantBookEnabled: true });
+    assert(s.currency === 'NZD', `new shift currency is ${s.currency}`);
     s.start = start; return s;
   });
 
@@ -117,7 +122,8 @@ try {
   const docIds = await step('worker uploads the four mandatory documents (multipart over HTTPS)', async () => {
     const ids = [];
     const expiry = new Date(Date.now() + 400 * 86400_000).toISOString().slice(0, 10);
-    for (const type of ['IDENTITY', 'RIGHT_TO_WORK', 'DBS_POLICE_CHECK', 'INDEMNITY_INSURANCE']) {
+    // the four every worker needs, plus the practising certificate New Zealand organizations require
+    for (const type of ['IDENTITY', 'RIGHT_TO_WORK', 'DBS_POLICE_CHECK', 'INDEMNITY_INSURANCE', 'PRACTISING_CERTIFICATE']) {
       const form = new FormData();
       form.append('type', type); form.append('expiresAt', expiry);
       form.append('file', new Blob(['%PDF-1.4 live test'], { type: 'application/pdf' }), `${type}.pdf`);
@@ -128,6 +134,8 @@ try {
 
   await step('worker cannot book yet, the manager sees four pending documents and verifies them', async () => {
     try { await worker.post(`/shifts/${shift.id}/instant-book`); throw new Error('booked without verified documents'); } catch (e) { assert(e.status === 403, e.message); }
+    const orgBefore = await manager.get(`/organizations/${me.organizationId}`).catch(() => null);
+    assert(orgBefore === null || orgBefore.currency === 'NZD', 'organization is not in the NZD market');
     // A self-registered worker is invisible to organizations until one invites them: look them up by their
     // registration number and add them to the staff bank, which brings them (and their documents) into scope.
     const before = await manager.get('/relief-workers/documents/queue');
@@ -159,7 +167,8 @@ try {
 
   const approved = await step('manager approves the timesheet; an invoice is issued', async () => {
     const r = await manager.patch(`/timesheets/${timesheet.id}/approve`);
-    assert(/^INV-\d{8}-[0-9A-F]{6}$/.test(r.invoice.invoiceNumber), 'bad invoice number'); return r;
+    assert(/^INV-\d{8}-[0-9A-F]{6}$/.test(r.invoice.invoiceNumber), 'bad invoice number');
+    assert(r.invoice.currency === 'NZD', `invoice currency is ${r.invoice.currency}`); return r;
   });
   const orgId = me.organizationId;
 
@@ -175,6 +184,7 @@ try {
   await step('worker sees the payment in Finance; tenants stay separate', async () => {
     const f = await worker.get('/invoices/my-finance');
     assert(f.totalEarned > 0 && f.invoices.some((i) => i.status === 'PAID'), 'payment not visible to the worker');
+    assert(f.byCurrency.length === 1 && f.byCurrency[0].currency === 'NZD', 'finance totals are not per currency');
     const others = await manager.get('/branches');
     assert(others.length === 1 && others[0].id === branchId, 'manager sees other branches');
   });

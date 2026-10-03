@@ -1,6 +1,6 @@
 # FlexShift Global TODO
 
-Consolidated from the Master Specification, B2B MVP Plan, Phase 1 Architecture Spec, Onboarding Roadmap, Execution Plan & Review Loop and the READMEs. Status as of 2026-10-03.
+Consolidated from the Master Specification, B2B MVP Plan, Phase 1 Architecture Spec, Onboarding Roadmap, Execution Plan & Review Loop and the READMEs. Status as of 2026-10-03. See `docs/HANDOFF.md` for the current state and `docs/DECISIONS.md` for why things are the way they are.
 
 Legend: [x] done · [~] partly done · [ ] not started
 
@@ -14,14 +14,17 @@ Legend: [x] done · [~] partly done · [ ] not started
 - [x] Document expiry job (30/7-day warnings, expiring documents, un-verifies workers)
 - [x] In-app notifications; analytics overview; market-rate benchmark (min 5 shifts / 3 orgs)
 - [x] Migrations committed; seed is idempotent and date-relative
-- [x] 59 jest e2e tests incl. a contract test of the shared API client; CI config
+- [x] 93 jest e2e tests incl. a contract test of the shared API client; CI config
 - [x] S3 document storage (set S3_BUCKET; tested against an S3-compatible server; local disk remains the default)
 - [x] Email delivery for important notifications (SMTP via nodemailer, off by default; per-user opt-out in the bell menu; drivers off/smtp/json)
 - [ ] Real BACS file: needs worker bank details (CSV payment batch exists, no sort code/account no.)
 - [x] Accounting export (purchase-invoice CSV in the common bills-import layout; account code / tax type / date range options)
 - [x] HTTP-only cookie sessions (per-app cookie, SameSite, CSRF header, bearer still accepted for tools/tests); no token in browser storage
 - [x] Leave conflict detection (same person cannot hold overlapping pending/approved leave at a branch)
+- [ ] **Decision needed:** how self-registered workers get verified. Today they are invisible to every organization until a manager adds them to the staff bank by registration number (DECISIONS 2.6). Options: a platform-wide verification queue run by the operator, or a worker-initiated "share my documents with this organization" request
 - [ ] Per-organization document *verification* (today any in-scope organization can verify a worker's documents; verified status is global)
+- [ ] `isVerified` only reflects the four base documents; NZ workers without a practising certificate still show as verified (bookability is enforced separately)
+- [ ] HEIC photos (iPhone default) are not accepted for document upload
 - [ ] Worker distance/postcode filtering for the feed
 - [x] ESLint (typescript-eslint; floating/misused promises in the API, hooks rules in the UIs) wired into `pnpm lint` and CI
 - [ ] Prettier / formatting convention
@@ -57,6 +60,10 @@ Legend: [x] done · [~] partly done · [ ] not started
 - [ ] Push notifications and offline support (needs a service worker and a push provider; deliberately not added: a stale cache is worse than none for a booking app)
 
 ## Infrastructure
+- [x] Live test deployment on a single Hetzner server (Helsinki) behind Caddy at `*.204-168-199-75.sslip.io`; nightly backups; runbook in `docs/HANDOFF.md`
+- [ ] Move to AWS (Auckland) or another NZ/AU host when going live (owner's intention); buy a real domain
+- [ ] Off-server backups (today backups sit on the same server); uptime monitor on `/health`; SMTP provider for email
+- [ ] CI for the browser walkthrough
 - [x] Dockerfiles (api, web-admin, worker-portal; built and API boot-tested), compose `--profile app`, `.gitlab-ci.yml`
 - [ ] Terraform / Terragrunt / EKS, S3 bucket, secrets management
 - [ ] Observability (structured logs, metrics, error tracking)

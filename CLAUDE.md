@@ -2,6 +2,9 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+> **New here? Read `docs/HANDOFF.md` first** (current state, how the live server is operated, what is pending), then
+> `docs/DECISIONS.md` (why things are built this way) and `TODO.md`. Update them when you change something they describe.
+
 ## Overview
 
 FlexShift is a two-sided healthcare workforce platform: B2B rota/staff-bank management for organizations (pharmacies, optical clinics) and shift discovery/booking/invoicing for relief workers. pnpm monorepo (`pnpm-workspace.yaml`: `apps/*`, `packages/*`). pnpm is the only package manager (pnpm 11 needs Node 22.13+; do not add `package-lock.json`).
