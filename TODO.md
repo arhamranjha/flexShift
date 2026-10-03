@@ -44,7 +44,8 @@ Legend: [x] done · [~] partly done · [ ] not started
 - [x] Notification bell
 - [x] Live clock-in/out on the shift page (clock-in opens 1h before start; clock-out submits the timesheet)
 - [x] Clearing the minimum-rate threshold / standard rate
-- [ ] Push notifications; installable PWA
+- [x] Installable on a phone home screen (web manifest, icons, theme colour)
+- [ ] Push notifications and offline support (needs a service worker and a push provider; deliberately not added: a stale cache is worse than none for a booking app)
 
 ## Infrastructure
 - [x] Dockerfiles (api, web-admin, worker-portal; built and API boot-tested), compose `--profile app`, `.gitlab-ci.yml`
