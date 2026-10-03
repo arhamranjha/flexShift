@@ -5,6 +5,7 @@ import { DOCUMENT_ACCEPT, ALL_DOC_TYPES, DOCUMENT_TYPES_LABEL, currencySymbol, d
 import { AlertTriangle, BadgeCheck, CheckCircle2, Circle, LogOut, Upload } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Chips, PageTitle } from '@/components/common';
+import { DocumentSharesSection } from '@/components/DocumentShares';
 import { api, useAuth } from '@/lib/auth';
 import { useMarket } from '@/lib/market';
 
@@ -40,7 +41,7 @@ export default function ProfilePage() {
       {(welcome || docs.length === 0) && (
         <div className="rounded-xl bg-emerald-50 border border-emerald-200 p-4 text-sm text-emerald-900">
           <p className="font-bold">Upload your compliance documents to start booking</p>
-          <p className="mt-0.5">Shifts need these verified documents: {MANDATORY.map((t) => docLabel(t).toLowerCase()).join(', ')}. The FlexShift team, or an organization that has invited you, reviews each upload and you are notified when it is verified.</p>
+          <p className="mt-0.5">Shifts need these verified documents: {MANDATORY.map((t) => docLabel(t).toLowerCase()).join(', ')}. The FlexShift team, or an organization you have asked or that has invited you, reviews each upload and you are notified when it is verified.</p>
         </div>
       )}
 
@@ -63,6 +64,8 @@ export default function ProfilePage() {
           {[...MANDATORY, ...OPTIONAL].map((t) => <DocRow key={t} type={t} name={docLabel(t)} doc={latest(t)} mandatory={MANDATORY.includes(t)} onUpload={() => setUpload(t)} />)}
         </div>
       </section>
+
+      <DocumentSharesSection />
 
       <Preferences key={profile.id + String(profile.hourlyRate) + String(profile.minimumShiftRate)} profile={profile} onSaved={() => { reload(); refresh(); }} />
 

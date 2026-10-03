@@ -97,6 +97,14 @@ enum LeaveType {
   UNPAID
 }
 
+enum DocumentShareStatus {
+  PENDING   // organization may see the worker and review their documents
+  ACCEPTED  // organization added the worker to its staff bank
+  DECLINED  // organization said no; the worker cannot ask that organization again
+  WITHDRAWN // worker took it back; they may ask again
+  EXPIRED   // nobody answered within 30 days (JobsService); the organization loses access, the worker may ask again
+}
+
 enum StaffBankTier {
   TIER_1_PREFERRED
   TIER_2_REGULAR
@@ -126,6 +134,7 @@ model Organization {
   staffBankMembers StaffBankMember[]
   invoices         Invoice[]
   users            User[]
+  documentShares   DocumentShare[]
 }
 
 model FacilityBranch {
@@ -175,6 +184,7 @@ model User {
   approvedTimesheets Timesheet[]       @relation("TimesheetApprover")
   reviewedLeaves LeaveRequest[]        @relation("LeaveReviewer")
   notifications  Notification[]
+  respondedShares DocumentShare[]      @relation("ShareResponder")
 }
 
 model ReliefProfile {
@@ -211,6 +221,7 @@ model ReliefProfile {
   staffBankMemberships     StaffBankMember[]
   watchedShifts            WorkerWatchedShift[]
   favouriteBranches        WorkerFavouriteBranch[]
+  documentShares           DocumentShare[]
 }
 
 model ComplianceDocument {
@@ -414,4 +425,23 @@ model Notification {
   createdAt DateTime  @default(now())
 
   @@index([userId, readAt])
+}
+
+/// A worker asking an organization to review their documents (the worker-initiated verification path, DECISIONS 2.6).
+/// While PENDING the organization has the worker in scope (AccessService.workerScope); accepting adds them to its staff bank.
+model DocumentShare {
+  id             String              @id @default(uuid())
+  reliefWorkerId String
+  reliefWorker   ReliefProfile       @relation(fields: [reliefWorkerId], references: [id], onDelete: Cascade)
+  organizationId String
+  organization   Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  status         DocumentShareStatus @default(PENDING)
+  respondedById  String?
+  respondedBy    User?               @relation("ShareResponder", fields: [respondedById], references: [id], onDelete: SetNull)
+  respondedAt    DateTime?
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+
+  @@unique([reliefWorkerId, organizationId])
+  @@index([organizationId, status])
 }

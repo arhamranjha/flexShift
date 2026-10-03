@@ -6,6 +6,7 @@ import { configureApp } from '../src/bootstrap';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { JobsService } from '../src/jobs/jobs.service';
 import { MailerService } from '../src/notifications/mailer.service';
+import { AccessService } from '../src/common/access.service';
 import { createOrganization } from '../src/cli/create-org';
 import { zonedTime } from '../src/common/time';
 
@@ -1200,6 +1201,185 @@ describe('automation: cascade, expiry, notifications, checklists, benchmarks', (
       expect((await prisma.reliefProfile.findUnique({ where: { id: wId } })).isVerified).toBe(true);
       expect((await get(wT, '/notifications').expect(200)).body.items.filter((n: any) => n.type === 'DOCUMENT_VERIFIED')).toHaveLength(5);
       expect((await post(wT, `/shifts/${shift.id}/instant-book`).expect(201)).body.status).toBe('BOOKED');
+    });
+
+    it('document sharing: a self-registered worker asks an organization to review them; only that organization sees them, and only while pending', async () => {
+      const reg = (await api().post('/auth/register/relief-worker').send({
+        email: `share-${Date.now()}@worker.test`, password: 'WorkerPass123!', firstName: 'Share', lastName: 'Requester', phone: '+64 21 555 0200', registrationNumber: `SHR-${Date.now() % 1e7}`,
+      }).expect(201)).body;
+      const wT = reg.accessToken as string;
+      const wId = reg.user.reliefProfile.id as string;
+      const docIds: string[] = [];
+      for (const type of ['IDENTITY', 'RIGHT_TO_WORK', 'DBS_POLICE_CHECK', 'INDEMNITY_INSURANCE', 'PRACTISING_CERTIFICATE']) {
+        const up = await api().post(`/relief-workers/${wId}/documents`).set('Authorization', `Bearer ${wT}`).field('type', type)
+          .field('expiresAt', at(400, 0)).attach('file', Buffer.from('%PDF-1.4 share'), { filename: `${type}.pdf` }).expect(201);
+        docIds.push(up.body.id);
+      }
+      const sees = async (t: string) => (await get(t, '/relief-workers/documents/queue').expect(200)).body.some((d: any) => docIds.includes(d.id));
+      const nzCode = (await prisma.organization.findUnique({ where: { id: nzOrgId } })).code as string;
+      const shareNotes = (t: string, type: string) => get(t, '/notifications').expect(200).then((r) => r.body.items.filter((n: any) => n.type === type));
+      expect(await sees(nzMgrT)).toBe(false);
+
+      // validation and roles
+      await post(wT, '/relief-workers/me/document-shares', {}).expect(400);
+      await post(wT, '/relief-workers/me/document-shares', { organizationId: nzOrgId, organizationCode: nzCode }).expect(400);
+      await post(wT, '/relief-workers/me/document-shares', { organizationCode: 'NOSUCHORG' }).expect(404);
+      await post(nzAdminT, '/relief-workers/me/document-shares', { organizationId: nzOrgId }).expect(403);
+      await get(wT, '/document-shares').expect(403);
+
+      // ask by code (case does not matter); only that organization is told and can now review the documents
+      const mailer = app.get(MailerService);
+      const mailsBefore = mailer.outbox.filter((m) => m.to === 'admin@aotearoa.test').length;
+      const share = (await post(wT, '/relief-workers/me/document-shares', { organizationCode: nzCode.toLowerCase() }).expect(201)).body;
+      expect(share).toMatchObject({ status: 'PENDING', organization: { id: nzOrgId } });
+      await post(wT, '/relief-workers/me/document-shares', { organizationId: nzOrgId }).expect(409);
+      expect((await shareNotes(nzAdminT, 'DOCUMENT_SHARE_REQUESTED')).some((n: any) => n.body.includes('Share Requester'))).toBe(true);
+      expect((await shareNotes(adminT, 'DOCUMENT_SHARE_REQUESTED')).some((n: any) => n.body.includes('Share Requester'))).toBe(false);
+      // the email carries a link, never the name a stranger typed
+      const mail = mailer.outbox.filter((m) => m.to === 'admin@aotearoa.test').slice(mailsBefore);
+      expect(mail).toHaveLength(1);
+      expect(mail[0].text).toContain('http://localhost:3000/compliance');
+      expect(mail[0].text).not.toContain('Share Requester');
+      expect(await sees(nzMgrT)).toBe(true);
+      expect(await sees(adminT)).toBe(false);
+      const nzList = (await get(nzMgrT, '/document-shares').expect(200)).body;
+      expect(nzList.find((s: any) => s.id === share.id).reliefWorker.documents).toHaveLength(5);
+      expect((await get(adminT, '/document-shares').expect(200)).body.some((s: any) => s.id === share.id)).toBe(false);
+      await post(adminT, `/document-shares/${share.id}/accept`, {}).expect(404); // another tenant cannot answer it
+
+      // withdrawing hides the worker again; asking again is allowed after 24 hours and reopens the same request
+      await post(wT, `/relief-workers/me/document-shares/${share.id}/withdraw`).expect(201);
+      await post(wT, `/relief-workers/me/document-shares/${share.id}/withdraw`).expect(409);
+      expect(await sees(nzMgrT)).toBe(false);
+      await post(nzMgrT, `/document-shares/${share.id}/accept`, {}).expect(409);
+      await post(wT, '/relief-workers/me/document-shares', { organizationId: nzOrgId }).expect(409); // too soon: each ask emails the admins
+      await prisma.$executeRaw`UPDATE "DocumentShare" SET "updatedAt" = now() - interval '25 hours' WHERE id = ${share.id}`;
+      expect((await post(wT, '/relief-workers/me/document-shares', { organizationId: nzOrgId }).expect(201)).body).toMatchObject({ id: share.id, status: 'PENDING' });
+
+      // the organization verifies the documents; a manager may not decline (organization-level decision) or add to another branch
+      for (const id of docIds) await patch(nzMgrT, `/relief-workers/documents/${id}/verify`, { status: 'VERIFIED' }).expect(200);
+      expect((await prisma.reliefProfile.findUnique({ where: { id: wId } })).isVerified).toBe(true);
+      await post(nzMgrT, `/document-shares/${share.id}/decline`).expect(403);
+      await post(nzMgrT, `/document-shares/${share.id}/accept`, { branchId: richmondId }).expect(403);
+
+      // a manager accepts: the worker joins the staff bank on the manager's own branch and stays in scope through it
+      expect((await post(nzMgrT, `/document-shares/${share.id}/accept`, { tier: 'TIER_1_PREFERRED' }).expect(201)).body.status).toBe('ACCEPTED');
+      await post(nzAdminT, `/document-shares/${share.id}/decline`).expect(409);
+      const member = await prisma.staffBankMember.findUnique({ where: { organizationId_reliefWorkerId: { organizationId: nzOrgId, reliefWorkerId: wId } } });
+      expect(member).toMatchObject({ tier: 'TIER_1_PREFERRED', branchId: nzBranchId });
+      expect((await get(nzMgrT, `/relief-workers/${wId}`).expect(200)).body.id).toBe(wId);
+      await post(wT, '/relief-workers/me/document-shares', { organizationId: nzOrgId }).expect(409); // already in the bank
+      expect(await shareNotes(wT, 'DOCUMENT_SHARE_ACCEPTED')).toHaveLength(1);
+      // removed from the bank later: the worker may ask that organization again
+      await prisma.staffBankMember.delete({ where: { id: member.id } });
+      const afterRemoval = (await get(wT, '/relief-workers/me/document-shares').expect(200)).body.find((x: any) => x.id === share.id);
+      expect(afterRemoval).toMatchObject({ status: 'ACCEPTED', inStaffBank: false }); // the portal offers to ask again
+      expect((await post(wT, '/relief-workers/me/document-shares', { organizationId: nzOrgId }).expect(201)).body.status).toBe('PENDING');
+      await post(wT, `/relief-workers/me/document-shares/${share.id}/withdraw`).expect(201);
+
+      // another organization the worker asks sees the profile, but not who at the first organization verified the documents
+      await get(adminT, `/relief-workers/${wId}`).expect(404);
+      const toApex = (await post(wT, '/relief-workers/me/document-shares', { organizationId: apexId }).expect(201)).body;
+      const seenByApex = (await get(adminT, `/relief-workers/${wId}`).expect(200)).body;
+      expect(seenByApex.documents.filter((d: any) => d.status === 'VERIFIED')).toHaveLength(5);
+      expect(seenByApex.documents.every((d: any) => d.verifiedBy === null)).toBe(true);
+      expect((await get(superT, `/relief-workers/${wId}`).expect(200)).body.documents[0].verifiedBy.email).toBe('mgr@aotearoa.test');
+
+      // declining: the organization loses sight of the worker, who may ask again only after 30 days
+      await post(adminT, `/document-shares/${toApex.id}/decline`).expect(201);
+      await get(adminT, `/relief-workers/${wId}`).expect(404);
+      await post(wT, '/relief-workers/me/document-shares', { organizationId: apexId }).expect(409);
+      const mine = (await get(wT, '/relief-workers/me/document-shares').expect(200)).body;
+      expect(mine.find((s: any) => s.id === toApex.id)).toMatchObject({ status: 'DECLINED', organization: { name: expect.any(String) } });
+      expect(await shareNotes(wT, 'DOCUMENT_SHARE_DECLINED')).toHaveLength(1);
+      await prisma.documentShare.update({ where: { id: toApex.id }, data: { respondedAt: new Date(Date.now() - 31 * DAY) } });
+      expect((await post(wT, '/relief-workers/me/document-shares', { organizationId: apexId }).expect(201)).body).toMatchObject({ id: toApex.id, status: 'PENDING' });
+
+      // a deactivated organization loses the worker from scope and nobody can answer for it
+      await prisma.organization.update({ where: { id: apexId }, data: { isActive: false } });
+      try {
+        await get(superT, `/relief-workers/${wId}`).expect(200);
+        expect((await prisma.reliefProfile.count({ where: { AND: [{ id: wId }, app.get(AccessService).workerScope({ id: 'x', role: 'ORG_ADMIN', organizationId: apexId } as any)] } }))).toBe(0);
+        await post(superT, `/document-shares/${toApex.id}/accept`, {}).expect(404);
+      } finally {
+        await prisma.organization.update({ where: { id: apexId }, data: { isActive: true } });
+      }
+      await post(wT, `/relief-workers/me/document-shares/${toApex.id}/withdraw`).expect(201);
+    });
+
+    it('document sharing: two people answering the same request at once, exactly one wins', async () => {
+      const reg = (await api().post('/auth/register/relief-worker').send({
+        email: `sharerace-${Date.now()}@worker.test`, password: 'WorkerPass123!', firstName: 'Race', lastName: 'Share', phone: '+64 21 555 0350', registrationNumber: `RACE-${Date.now() % 1e7}`,
+      }).expect(201)).body;
+      const share = (await post(reg.accessToken, '/relief-workers/me/document-shares', { organizationId: nzOrgId }).expect(201)).body;
+      const answers = await Promise.all([
+        post(nzMgrT, `/document-shares/${share.id}/accept`, {}),
+        post(nzAdminT, `/document-shares/${share.id}/decline`),
+        post(reg.accessToken, `/relief-workers/me/document-shares/${share.id}/withdraw`),
+      ]);
+      expect(answers.filter((r) => r.status === 201)).toHaveLength(1);
+      expect(answers.filter((r) => r.status === 409)).toHaveLength(2);
+      const final = await prisma.documentShare.findUnique({ where: { id: share.id } });
+      const inBank = await prisma.staffBankMember.count({ where: { organizationId: nzOrgId, reliefWorkerId: share.reliefWorkerId } });
+      expect(inBank).toBe(final.status === 'ACCEPTED' ? 1 : 0); // the staff bank only changes when the accept won
+    });
+
+    it('document sharing: a worker can have at most five requests waiting', async () => {
+      const reg = (await api().post('/auth/register/relief-worker').send({
+        email: `sharecap-${Date.now()}@worker.test`, password: 'WorkerPass123!', firstName: 'Cap', lastName: 'Test', phone: '+64 21 555 0300', registrationNumber: `CAP-${Date.now() % 1e7}`,
+      }).expect(201)).body;
+      const orgs = await prisma.organization.findMany({ where: { isActive: true }, select: { id: true }, take: 6 });
+      const extra = 6 - orgs.length;
+      for (let i = 0; i < extra; i++) {
+        orgs.push(await prisma.organization.create({ data: { name: `Cap Org ${i}`, slug: `cap-org-${i}-${Date.now()}`, code: `CAPORG${i}${Date.now() % 1e5}`, billingEmail: 'cap@org.test', phone: '1' }, select: { id: true } }));
+      }
+      for (const o of orgs.slice(0, 5)) await post(reg.accessToken, '/relief-workers/me/document-shares', { organizationId: o.id }).expect(201);
+      const sixth = await post(reg.accessToken, '/relief-workers/me/document-shares', { organizationId: orgs[5].id }).expect(400);
+      expect(sixth.body.message).toMatch(/at most 5/);
+
+      // the cap holds under concurrency too: a fresh worker sending six requests at once gets exactly five through
+      const reg2 = (await api().post('/auth/register/relief-worker').send({
+        email: `sharecap2-${Date.now()}@worker.test`, password: 'WorkerPass123!', firstName: 'Cap', lastName: 'Race', phone: '+64 21 555 0301', registrationNumber: `CAP2-${Date.now() % 1e7}`,
+      }).expect(201)).body;
+      const burst = await Promise.all(orgs.map((o) => post(reg2.accessToken, '/relief-workers/me/document-shares', { organizationId: o.id })));
+      expect(burst.filter((r) => r.status === 201)).toHaveLength(5);
+      expect(burst.filter((r) => r.status === 400)).toHaveLength(1);
+      expect(await prisma.documentShare.count({ where: { reliefWorkerId: reg2.user.reliefProfile.id, status: 'PENDING' } })).toBe(5);
+    });
+
+    it('document sharing: an unanswered request lapses after 30 days, and an organization without an admin is not a dead end', async () => {
+      const reg = (await api().post('/auth/register/relief-worker').send({
+        email: `shareexp-${Date.now()}@worker.test`, password: 'WorkerPass123!', firstName: 'Lapse', lastName: 'Worker', phone: '+64 21 555 0360', registrationNumber: `EXP-${Date.now() % 1e7}`,
+      }).expect(201)).body;
+      const wT = reg.accessToken as string;
+      const wId = reg.user.reliefProfile.id as string;
+
+      // with the NZ admin deactivated, the request reaches the NZ manager instead
+      const nzAdmin = await prisma.user.findUnique({ where: { email: 'admin@aotearoa.test' } });
+      await prisma.user.update({ where: { id: nzAdmin.id }, data: { isActive: false } });
+      let share: any;
+      try {
+        share = (await post(wT, '/relief-workers/me/document-shares', { organizationId: nzOrgId }).expect(201)).body;
+      } finally {
+        await prisma.user.update({ where: { id: nzAdmin.id }, data: { isActive: true } });
+      }
+      const mgrNotes = (await get(nzMgrT, '/notifications').expect(200)).body.items.filter((n: any) => n.type === 'DOCUMENT_SHARE_REQUESTED' && n.body.includes('Lapse Worker'));
+      expect(mgrNotes).toHaveLength(1);
+      await get(nzMgrT, `/relief-workers/${wId}`).expect(200);
+
+      // nothing lapses before 30 days; after that the organization loses sight of the worker, who is told and may ask again
+      const jobs = app.get(JobsService);
+      expect((await jobs.runShareExpiry()).expired).toBe(0);
+      await prisma.$executeRaw`UPDATE "DocumentShare" SET "updatedAt" = now() - interval '31 days' WHERE id = ${share.id}`;
+      expect((await jobs.runShareExpiry()).expired).toBe(1);
+      expect((await jobs.runShareExpiry()).expired).toBe(0); // runs are idempotent
+      expect((await prisma.documentShare.findUnique({ where: { id: share.id } })).status).toBe('EXPIRED');
+      await get(nzMgrT, `/relief-workers/${wId}`).expect(404);
+      await post(nzMgrT, `/document-shares/${share.id}/accept`, {}).expect(409);
+      const notes = (await get(wT, '/notifications').expect(200)).body.items.filter((n: any) => n.type === 'DOCUMENT_SHARE_EXPIRED');
+      expect(notes).toHaveLength(1);
+      expect((await post(wT, '/relief-workers/me/document-shares', { organizationId: nzOrgId }).expect(201)).body).toMatchObject({ id: share.id, status: 'PENDING' });
+      await post(wT, `/relief-workers/me/document-shares/${share.id}/withdraw`).expect(201);
     });
   });
 

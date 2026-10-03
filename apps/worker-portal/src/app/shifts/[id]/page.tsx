@@ -6,6 +6,7 @@ import { Check, Heart, MapPin, Phone, Timer, X } from 'lucide-react';
 import { useParams } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { PageTitle, Payout, ProblemList, ShiftBadges, eligibilityProblems } from '@/components/common';
+import { AskOrganizationCard } from '@/components/DocumentShares';
 import { api, useAuth } from '@/lib/auth';
 import { useMarket } from '@/lib/market';
 
@@ -199,6 +200,10 @@ export default function ShiftDetailPage() {
         {isMine && <ClockCard shift={shift} onChanged={reload} />}
 
         {application && !isMine && <Card className="p-4 flex items-center justify-between"><span className="text-sm font-semibold">Your application</span><StatusBadge status={application.status} /></Card>}
+
+        {biddable && !isMine && profile && !profile.isVerified && shift.branch?.organization && (
+          <AskOrganizationCard organizationId={shift.branch.organization.id} organizationName={shift.branch.organization.name} />
+        )}
 
         {biddable && !isMine && (
           <div className="space-y-2">

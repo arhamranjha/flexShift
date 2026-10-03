@@ -1,5 +1,5 @@
 import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { Prisma, Role } from '@prisma/client';
+import { DocumentShareStatus, Prisma, Role } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 
 /** The user object attached to the request by JwtStrategy. */
@@ -63,8 +63,8 @@ export class AccessService {
   }
 
   /**
-   * Relief workers an organization may see: ones it onboarded, has in its staff bank,
-   * or that applied / negotiated / were booked on its shifts. SUPER_ADMIN sees all.
+   * Relief workers an organization may see: ones it onboarded, has in its staff bank, that applied / negotiated /
+   * were booked on its shifts, or that have a pending request asking it to review their documents. SUPER_ADMIN sees all.
    */
   workerScope(user: AuthUser): Prisma.ReliefProfileWhereInput {
     if (user.role === Role.SUPER_ADMIN) return {};
@@ -77,6 +77,8 @@ export class AccessService {
         { applications: { some: onOrgShift } },
         { negotiations: { some: onOrgShift } },
         { assignedShifts: { some: { branch: { organizationId: orgId } } } },
+        // Only while pending: acceptance adds the worker to the staff bank, which keeps them in scope from then on.
+        { documentShares: { some: { organizationId: orgId, status: DocumentShareStatus.PENDING, organization: { isActive: true } } } },
       ],
     };
   }

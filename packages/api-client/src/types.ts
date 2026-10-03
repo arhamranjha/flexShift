@@ -170,6 +170,24 @@ export interface StaffBankMember {
   organization?: { id: string; name: string };
 }
 
+export type DocumentShareStatus = 'PENDING' | 'ACCEPTED' | 'DECLINED' | 'WITHDRAWN' | 'EXPIRED';
+
+/** A worker asking an organization to review their documents. While PENDING the organization can see and verify them. */
+export interface DocumentShare {
+  id: string;
+  reliefWorkerId: string;
+  organizationId: string;
+  status: DocumentShareStatus;
+  respondedAt?: string | null;
+  createdAt: string;
+  organization?: { id: string; name: string };
+  /** Worker's own list only: whether an accepted request still stands (the organization may have removed them since). */
+  inStaffBank?: boolean;
+  reliefWorker?: Pick<ReliefProfile, 'id' | 'firstName' | 'lastName' | 'profession' | 'registrationNumber' | 'isVerified' | 'country'> & {
+    documents: Pick<ComplianceDocument, 'id' | 'type' | 'status' | 'expiresAt'>[];
+  };
+}
+
 export interface Timesheet {
   id: string;
   shiftId: string;

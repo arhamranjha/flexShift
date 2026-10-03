@@ -21,10 +21,15 @@ const EMAILED_TYPES = new Set([
   'SHIFT_BOOKED', 'TIMESHEET_APPROVED', 'INVOICE_PAID',
   'DOCUMENT_VERIFIED', 'DOCUMENT_REJECTED', 'DOCUMENT_EXPIRING', 'DOCUMENT_EXPIRED',
   'EMERGENCY_SHIFT', 'WORKER_COMPLIANCE_LAPSED',
+  'DOCUMENT_SHARE_REQUESTED', 'DOCUMENT_SHARE_ACCEPTED', 'DOCUMENT_SHARE_DECLINED', 'DOCUMENT_SHARE_EXPIRED',
 ]);
 
 /** Types whose body contains text typed by a manager or a worker: emailed with a link only, never the text. */
-const FREE_TEXT_TYPES = new Set(['EMERGENCY_SHIFT', 'SHIFT_BOOKED', 'WORKER_COMPLIANCE_LAPSED', 'DOCUMENT_REJECTED', 'NEGOTIATION_PROPOSED']);
+const FREE_TEXT_TYPES = new Set([
+  'EMERGENCY_SHIFT', 'SHIFT_BOOKED', 'WORKER_COMPLIANCE_LAPSED', 'DOCUMENT_REJECTED', 'NEGOTIATION_PROPOSED',
+  // names typed by a self-registered stranger, or an organization name typed by its admin
+  'DOCUMENT_SHARE_REQUESTED', 'DOCUMENT_SHARE_ACCEPTED', 'DOCUMENT_SHARE_DECLINED', 'DOCUMENT_SHARE_EXPIRED',
+]);
 
 const trimSlash = (u: string) => u.replace(/\/+$/, '');
 
@@ -83,6 +88,17 @@ export class NotificationsService {
   async notifyPlatformAdmins(n: NotificationInput) {
     const admins = await this.prisma.user.findMany({ where: { role: Role.SUPER_ADMIN, isActive: true }, select: { id: true } });
     await this.notifyUsers(admins.map((a) => a.id), n);
+  }
+
+  /** Every active admin of one organization (organization-level events, such as a worker asking it to review their documents). */
+  async notifyOrgAdmins(organizationId: string, n: NotificationInput) {
+    // An organization without an active admin should not be a silent dead end: its managers are told instead, and failing
+    // those the platform operator.
+    for (const role of [Role.ORG_ADMIN, Role.FACILITY_MANAGER]) {
+      const users = await this.prisma.user.findMany({ where: { organizationId, role, isActive: true }, select: { id: true } });
+      if (users.length) return this.notifyUsers(users.map((u) => u.id), n);
+    }
+    await this.notifyPlatformAdmins(n);
   }
 
   async notifyWorker(workerId: string, n: NotificationInput) {

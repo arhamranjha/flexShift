@@ -1,0 +1,134 @@
+'use client';
+
+import { Badge, Button, Card, ErrorBlock, Field, Modal, Select, th, td, useAction, useAsync } from '@flexshift/ui';
+import type { DocumentShare, StaffBankTier } from '@flexshift/api-client';
+import { Inbox } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { fmtLong } from '@/components/DocHelpers';
+import { TIERS } from '@/components/AddToStaffBankModal';
+import { api, useAuth, useScope } from '@/lib/auth';
+
+/**
+ * Workers who asked this organization to review their documents (the worker-initiated verification path).
+ * While a request waits, the worker's documents appear in the queue below; accepting adds them to the staff bank.
+ * `refreshKey` changes when the queue below changes, so the verified/waiting counts stay current.
+ */
+export function ReviewRequests({ refreshKey, onAnswered }: { refreshKey: number; onAnswered: () => void }) {
+  const { user } = useAuth();
+  const { data, error, loading, reload } = useAsync(() => api.documentShares.list({ status: 'PENDING' }), [refreshKey]);
+  const [accepting, setAccepting] = useState<DocumentShare | null>(null);
+  const [declining, setDeclining] = useState<DocumentShare | null>(null);
+  // Declining blocks the worker from asking again for 30 days, so only organization admins may do it (the server enforces this too).
+  const canDecline = user?.role === 'ORG_ADMIN' || user?.role === 'SUPER_ADMIN';
+  const done = () => { reload(); onAnswered(); };
+
+  if (error) return <Card className="p-4"><ErrorBlock error={error} retry={reload} /></Card>;
+  if (loading && !data) return <p className="text-xs text-slate-500">Loading review requests…</p>;
+  if (!data?.length) return null;
+
+  return (
+    <Card>
+      <div className="px-4 py-3 border-b border-slate-100 flex items-center gap-2">
+        <Inbox className="w-4 h-4 text-emerald-700" />
+        <h2 className="font-bold text-slate-900">Review requests</h2>
+        <Badge tone="amber">{data.length}</Badge>
+        <p className="text-xs text-slate-500 ml-2">These workers asked you to review their documents. Their uploads are in the queue below.</p>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full">
+          <thead><tr>
+            <th className={th}>Worker</th>
+            {user?.role === 'SUPER_ADMIN' && <th className={th}>Organization</th>}
+            <th className={th}>Documents</th><th className={th}>Asked</th><th className={th} />
+          </tr></thead>
+          <tbody>
+            {data.map((s) => {
+              const w = s.reliefWorker;
+              const docs = w?.documents ?? [];
+              const verified = docs.filter((d) => d.status === 'VERIFIED').length;
+              const pending = docs.filter((d) => d.status === 'PENDING').length;
+              return (
+                <tr key={s.id}>
+                  <td className={td}>
+                    <p className="font-semibold text-slate-900">{w ? `${w.firstName} ${w.lastName}` : '-'}</p>
+                    <p className="text-xs text-slate-500">{w?.profession} · {w?.registrationNumber}{w?.country ? ` · ${w.country}` : ''}</p>
+                  </td>
+                  {user?.role === 'SUPER_ADMIN' && <td className={td}>{s.organization?.name}</td>}
+                  <td className={td}>
+                    <span className="text-sm">{verified} verified, {pending} waiting</span>
+                    {w?.isVerified && <Badge tone="emerald" className="ml-2">Verified</Badge>}
+                  </td>
+                  <td className={td}>{fmtLong(s.createdAt)}</td>
+                  <td className={`${td} whitespace-nowrap text-right`}>
+                    {canDecline && <Button size="sm" variant="secondary" onClick={() => setDeclining(s)}>Decline</Button>}
+                    <Button size="sm" className="ml-2" onClick={() => setAccepting(s)}>Add to staff bank</Button>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      <AcceptModal share={accepting} onClose={() => setAccepting(null)} onDone={done} />
+      <DeclineModal share={declining} onClose={() => setDeclining(null)} onDone={done} />
+    </Card>
+  );
+}
+
+function DeclineModal({ share, onClose, onDone }: { share: DocumentShare | null; onClose: () => void; onDone: () => void }) {
+  const { run, busy } = useAction();
+  const w = share?.reliefWorker;
+  async function decline() {
+    if (share && await run(() => api.documentShares.decline(share.id), 'Request declined')) { onClose(); onDone(); }
+  }
+  return (
+    <Modal open={!!share} onClose={onClose} title="Decline request"
+      footer={<><Button variant="secondary" onClick={onClose}>Cancel</Button><Button variant="danger" loading={busy} onClick={decline}>Decline</Button></>}>
+      <p className="text-sm">
+        Decline <b>{w?.firstName} {w?.lastName}</b>? You will no longer see their profile or documents, and they cannot ask you again for 30 days.
+      </p>
+    </Modal>
+  );
+}
+
+function AcceptModal({ share, onClose, onDone }: { share: DocumentShare | null; onClose: () => void; onDone: () => void }) {
+  const { user } = useAuth();
+  const { branches } = useScope();
+  const { run, busy } = useAction();
+  const isManager = user?.role === 'FACILITY_MANAGER';
+  const [tier, setTier] = useState<StaffBankTier>('TIER_2_REGULAR');
+  const [branchId, setBranchId] = useState('');
+  // Each request starts from the defaults, even after a cancelled one.
+  useEffect(() => { setTier('TIER_2_REGULAR'); setBranchId(''); }, [share?.id]);
+  const w = share?.reliefWorker;
+
+  async function accept() {
+    if (!share) return;
+    // Managers always add to their own branch (the server enforces it); super admins add organization-wide.
+    const body = { tier, ...(user?.role === 'ORG_ADMIN' && branchId ? { branchId } : {}) };
+    if (await run(() => api.documentShares.accept(share.id, body), `${w?.firstName} ${w?.lastName} added to the staff bank`)) {
+      onClose(); onDone();
+    }
+  }
+
+  return (
+    <Modal open={!!share} onClose={onClose} title="Add to staff bank"
+      footer={<><Button variant="secondary" onClick={onClose}>Cancel</Button><Button loading={busy} onClick={accept}>Add to staff bank</Button></>}>
+      {w && <p className="text-sm">Add <b>{w.firstName} {w.lastName}</b> to your staff bank. {!w.isVerified && 'Their documents are not all verified yet; they cannot book shifts until they are.'}</p>}
+      <Field label="Tier">
+        <Select value={tier} onChange={(e) => setTier(e.target.value as StaffBankTier)}>
+          {TIERS.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
+        </Select>
+      </Field>
+      {user?.role === 'ORG_ADMIN' && (
+        <Field label="Branch" hint="Leave empty for an organization-wide member.">
+          <Select value={branchId} onChange={(e) => setBranchId(e.target.value)}>
+            <option value="">Organization-wide</option>
+            {branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+          </Select>
+        </Field>
+      )}
+      {isManager && <p className="text-xs text-slate-500">They will be added to your branch.</p>}
+    </Modal>
+  );
+}

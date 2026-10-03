@@ -14,6 +14,7 @@ import { OrganizationsModule } from './organizations/organizations.module';
 import { BranchesModule } from './branches/branches.module';
 import { ReliefWorkersModule } from './relief-workers/relief-workers.module';
 import { StaffBankModule } from './staff-bank/staff-bank.module';
+import { DocumentSharesModule } from './document-shares/document-shares.module';
 import { ShiftsModule } from './shifts/shifts.module';
 import { NegotiationsModule } from './negotiations/negotiations.module';
 import { TimesheetsModule } from './timesheets/timesheets.module';
@@ -43,6 +44,7 @@ import { MarketsModule } from './markets/markets.module';
     BranchesModule,
     ReliefWorkersModule,
     StaffBankModule,
+    DocumentSharesModule,
     ShiftsModule,
     NegotiationsModule,
     TimesheetsModule,

@@ -159,6 +159,32 @@ describe('api-client against the live API', () => {
     await expect(mgr.api.workers.verifyDocument(doc.id, 'REJECTED')).rejects.toThrow(/note/i);
   });
 
+  it('document sharing: worker asks, organization lists, accepts or declines', async () => {
+    const self = clientFor();
+    const stamp = Date.now();
+    const reg = await self.api.auth.registerWorker({
+      email: `share${stamp}@worker.test`, password: 'WorkerPass123!', firstName: 'Client', lastName: 'Share', phone: '+64 21 555 0400', registrationNumber: `CSH-${stamp % 1e7}`,
+    });
+    await self.login(reg.user.email, 'WorkerPass123!');
+    const org = await admin.api.organizations.get(orgId);
+
+    const share = await self.api.documentShares.create({ organizationCode: org.code });
+    expect(share).toMatchObject({ status: 'PENDING', organization: { id: orgId } });
+    expect((await self.api.documentShares.mine()).map((s) => s.id)).toEqual([share.id]);
+    const other = await self.api.documentShares.create({ organizationCode: 'CREST-UK' });
+    expect((await self.api.documentShares.withdraw(other.id)).status).toBe('WITHDRAWN');
+
+    const listed = (await mgr.api.documentShares.list({ status: 'PENDING' })).find((s) => s.id === share.id)!;
+    expect(listed.reliefWorker!.lastName).toBe('Share');
+    expect(Array.isArray(listed.reliefWorker!.documents)).toBe(true);
+    expect((await admin.api.documentShares.accept(share.id, { tier: 'TIER_3_RESERVE', branchId: richmondId })).status).toBe('ACCEPTED');
+    await expect(admin.api.documentShares.decline(share.id)).rejects.toMatchObject({ status: 409 });
+    await expect(mgr.api.documentShares.decline(other.id)).rejects.toMatchObject({ status: 403 }); // declining is for organization admins
+    const member = (await admin.api.staffBank.list(orgId)).find((m) => m.reliefWorkerId === reg.user.reliefProfile!.id)!;
+    expect(member).toMatchObject({ tier: 'TIER_3_RESERVE', branchId: richmondId });
+    await admin.api.staffBank.remove(member.id);
+  });
+
   it('worker profile preferences and password change', async () => {
     const p = await sarah.api.workers.updatePreferences({ minimumShiftRate: 27, hourlyRate: 33, bio: 'hello', systemTags: ['ProScript', 'Columbus'], accreditations: ['CPCS'] });
     expect(Number(p.minimumShiftRate)).toBe(27);
