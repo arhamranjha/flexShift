@@ -11,7 +11,11 @@ const STATUS: Record<DocumentShareStatus, { label: string; tone: Tone }> = {
   ACCEPTED: { label: 'In their staff bank', tone: 'emerald' },
   DECLINED: { label: 'Declined', tone: 'rose' },
   WITHDRAWN: { label: 'Withdrawn', tone: 'slate' },
+  EXPIRED: { label: 'No answer (lapsed after 30 days)', tone: 'slate' },
 };
+
+/** An accepted request whose staff-bank place was later removed reads differently, and may be sent again. */
+const statusOf = (s: DocumentShare) => (s.status === 'ACCEPTED' && !s.inStaffBank ? { label: 'No longer in their staff bank', tone: 'slate' as Tone } : STATUS[s.status]);
 
 /** Profile section: organizations the worker has asked to review their documents, plus "ask by code". */
 export function DocumentSharesSection() {
@@ -51,7 +55,7 @@ export function DocumentSharesSection() {
 
 function ShareRow({ share, onChanged }: { share: DocumentShare; onChanged: () => void }) {
   const { run, busy } = useAction();
-  const s = STATUS[share.status];
+  const s = statusOf(share);
   return (
     <li className="flex items-center gap-3 text-sm">
       <Building2 className="w-4 h-4 text-slate-400 shrink-0" />
@@ -74,9 +78,11 @@ export function AskOrganizationCard({ organizationId, organizationName }: { orga
   const { data: shares, error, reload } = useAsync(() => api.documentShares.mine(), []);
   const { run, busy } = useAction();
   const existing = shares?.find((s) => s.organizationId === organizationId);
-  // Withdrawn requests, and declines more than 30 days old, can be sent again (the server enforces the waiting times).
+  // Withdrawn and lapsed requests, declines more than 30 days old, and acceptances whose staff-bank place was removed can be
+  // sent again (the server enforces the waiting times and says why if it is too soon).
   const declineOver = existing?.status === 'DECLINED' && Date.now() - new Date(existing.respondedAt ?? 0).getTime() > 30 * 86_400_000;
-  const canAsk = shares !== undefined && (!existing || existing.status === 'WITHDRAWN' || declineOver);
+  const canAsk = shares !== undefined && (!existing || existing.status === 'WITHDRAWN' || existing.status === 'EXPIRED' || declineOver
+    || (existing.status === 'ACCEPTED' && !existing.inStaffBank));
 
   if (error) return <Card className="p-4"><ErrorBlock error={error} retry={reload} /></Card>;
 
@@ -87,7 +93,7 @@ export function AskOrganizationCard({ organizationId, organizationName }: { orga
         Ask {organizationName} to review your documents. They will see your profile and documents, and can add you to their staff bank.
       </p>
       {existing && !canAsk
-        ? <Badge tone={STATUS[existing.status].tone}>{STATUS[existing.status].label}</Badge>
+        ? <Badge tone={statusOf(existing).tone}>{statusOf(existing).label}</Badge>
         : (
           <Button variant="secondary" className="w-full min-h-[48px] text-base" loading={busy} disabled={!canAsk}
             onClick={async () => { if (await run(() => api.documentShares.create({ organizationId }), `Request sent to ${organizationName}`)) reload(); }}>

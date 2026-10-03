@@ -14,7 +14,7 @@ Legend: [x] done · [~] partly done · [ ] not started
 - [x] Document expiry job (30/7-day warnings, expiring documents, un-verifies workers)
 - [x] In-app notifications; analytics overview; market-rate benchmark (min 5 shifts / 3 orgs)
 - [x] Migrations committed; seed is idempotent and date-relative
-- [x] 98 jest e2e tests incl. a contract test of the shared API client; CI config
+- [x] 99 jest e2e tests incl. a contract test of the shared API client; CI config
 - [x] S3 document storage (set S3_BUCKET; tested against an S3-compatible server; local disk remains the default)
 - [x] Email delivery for important notifications (SMTP via nodemailer, off by default; per-user opt-out in the bell menu; drivers off/smtp/json)
 - [ ] Real BACS file: needs worker bank details (CSV payment batch exists, no sort code/account no.)
@@ -23,7 +23,8 @@ Legend: [x] done · [~] partly done · [ ] not started
 - [x] Leave conflict detection (same person cannot hold overlapping pending/approved leave at a branch)
 - [x] Operator (platform) verification of self-registered workers: platform queue in the Compliance Desk for super admins, notification on upload, worker told who reviews (DECISIONS 2.6)
 - [x] Worker-initiated "share my documents with this organization" request: by organization code or from a shift page; organization reviews in the Compliance Desk and accepts into its staff bank or declines (DECISIONS 2.6)
-- [ ] Per-organization document *verification* (today any in-scope organization can verify a worker's documents; verified status is global)
+- [ ] Per-organization document *verification* (today any in-scope organization can verify a worker's documents; verified status is global). With document sharing a worker can choose who verifies them; cheap interim options from the PR #4 review: show booking organizations which organization verified each document, or require operator verification for the identity document (owner decision)
+- [ ] Organization codes can be probed through the share endpoint (unknown code 404 vs known 201/409); needs a worker account and is throttled, so accepted for now
 - [ ] `isVerified` only reflects the four base documents; NZ workers without a practising certificate still show as verified (bookability is enforced separately)
 - [ ] HEIC photos (iPhone default) are not accepted for document upload
 - [ ] Worker distance/postcode filtering for the feed
@@ -33,7 +34,7 @@ Legend: [x] done · [~] partly done · [ ] not started
 
 ## Markets (NZ first)
 - [x] Markets as data: NZ (default) and GB; currency, timezone, tax, credentials and wording per market; shifts and invoices carry their currency
-- [ ] Confirm the NZ defaults with a pharmacy customer and edit `common/markets.ts` (questions ready: `docs/NZ_PHARMACY_QUESTIONS.md`)
+- [ ] Confirm the NZ defaults with a pharmacy customer (regulator wording, police-vetting requirements, dispensing-system names, accreditations) and edit `common/markets.ts`
 - [ ] NZ privacy review before real worker documents are stored (Privacy Act 2020, IPP 12 for offshore hosting)
 - [ ] Per-currency totals are shown wherever amounts are summed; a reporting view per currency (and exchange handling) is not built
 - [ ] GST: invoices show no tax today; most contractors are probably not GST-registered, so the export defaults to "No GST"

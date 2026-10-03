@@ -102,6 +102,7 @@ enum DocumentShareStatus {
   ACCEPTED  // organization added the worker to its staff bank
   DECLINED  // organization said no; the worker cannot ask that organization again
   WITHDRAWN // worker took it back; they may ask again
+  EXPIRED   // nobody answered within 30 days (JobsService); the organization loses access, the worker may ask again
 }
 
 enum StaffBankTier {

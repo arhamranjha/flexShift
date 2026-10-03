@@ -73,7 +73,12 @@ only from PENDING (an accepted request does not keep a worker visible after the 
 a decline stands for 30 days and only organization admins may decline (a branch manager misclick should not lock a worker out); after
 withdrawing, a worker waits 24 hours before asking the same organization again, and asking is throttled (`SHARE_THROTTLE_LIMIT`, 10/min), because
 every request notifies the organization's admins; at most 5 requests may wait at once (no spraying every organization); accepting is allowed
-before the documents are verified (the eligibility gate still blocks booking); a deactivated organization loses pending workers from scope.
+before the documents are verified (the eligibility gate still blocks booking); a deactivated organization loses pending workers from scope;
+a request nobody answers **lapses after 30 days** (`EXPIRED`, `JobsService.runShareExpiry`, daily) so a silent organization does not keep
+access to identity documents (Privacy Act mindset), and the worker may ask again; the 5-waiting cap is checked under the worker row lock
+(`lockWorker`) so parallel requests cannot exceed it; request notifications go to the organization's admins, or its managers if it has no
+active admin, or the platform operator, so no request is a silent dead end. A pending organization sees the worker's full profile (name,
+contact details, rates, experience, systems, documents; there is no home address on the profile): the worker is told exactly that before asking.
 Request emails never contain the worker's name (it is typed by a stranger; see 2.9). Because any organization a worker asks can now see
 their profile, staff only see *who* verified a document when the verifier is from their own organization, and only their own branches among
 the worker's favourites. Cost of (1): the operator is a bottleneck by design.

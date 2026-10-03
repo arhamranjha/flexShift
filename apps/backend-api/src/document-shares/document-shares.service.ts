@@ -1,8 +1,9 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { DocumentShareStatus, Prisma, Role, StaffBankTier } from '@prisma/client';
+import { DocumentShareStatus, Role, StaffBankTier } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AccessService, AuthUser } from '../common/access.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { lockWorker } from '../shifts/eligibility';
 import { AcceptDocumentShareDto, CreateDocumentShareDto, DocumentShareQueryDto } from './dto/document-share.dto';
 
 /** A worker may have this many requests waiting at once, so nobody can spray every organization on the platform. */
@@ -11,6 +12,8 @@ export const MAX_PENDING_SHARES = 5;
 export const REASK_AFTER_WITHDRAW_MS = 24 * 3_600_000;
 /** A decline stands this long; after that the worker may ask again (a misclick or a changed situation should not be forever). */
 export const REASK_AFTER_DECLINE_MS = 30 * 86_400_000;
+/** A request nobody answers lapses after this long (JobsService.runShareExpiry), so a silent organization does not keep access. */
+export const SHARE_PENDING_TTL_MS = 30 * 86_400_000;
 
 const ORG_SUMMARY = { select: { id: true, name: true } } as const;
 const WORKER_SUMMARY = {
@@ -34,12 +37,18 @@ export class DocumentSharesService {
     private notifications: NotificationsService,
   ) {}
 
-  listMine(workerId: string) {
-    return this.prisma.documentShare.findMany({
-      where: { reliefWorkerId: workerId },
-      include: { organization: ORG_SUMMARY },
-      orderBy: { createdAt: 'desc' },
-    });
+  /** The worker's requests; `inStaffBank` says whether an accepted request still stands (the organization may have removed them since). */
+  async listMine(workerId: string) {
+    const [shares, members] = await Promise.all([
+      this.prisma.documentShare.findMany({
+        where: { reliefWorkerId: workerId },
+        include: { organization: ORG_SUMMARY },
+        orderBy: { createdAt: 'desc' },
+      }),
+      this.prisma.staffBankMember.findMany({ where: { reliefWorkerId: workerId }, select: { organizationId: true } }),
+    ]);
+    const banked = new Set(members.map((m) => m.organizationId));
+    return shares.map((s) => ({ ...s, inStaffBank: banked.has(s.organizationId) }));
   }
 
   async create(workerId: string, dto: CreateDocumentShareDto) {
@@ -55,45 +64,42 @@ export class DocumentSharesService {
     });
     if (!org) throw new NotFoundException('Organization not found');
 
-    const [worker, member, existing, pending] = await Promise.all([
-      this.prisma.reliefProfile.findUniqueOrThrow({ where: { id: workerId }, select: { firstName: true, lastName: true, profession: true } }),
-      this.prisma.staffBankMember.findUnique({ where: { organizationId_reliefWorkerId: { organizationId: org.id, reliefWorkerId: workerId } } }),
-      this.prisma.documentShare.findUnique({ where: { reliefWorkerId_organizationId: { reliefWorkerId: workerId, organizationId: org.id } } }),
-      this.prisma.documentShare.count({ where: { reliefWorkerId: workerId, status: DocumentShareStatus.PENDING } }),
-    ]);
-    if (member) throw new ConflictException(`You are already in ${org.name}'s staff bank`);
-    if (existing?.status === DocumentShareStatus.PENDING) throw new ConflictException(`You have already asked ${org.name}`);
-    const since = (d?: Date | null) => Date.now() - (d?.getTime() ?? 0);
-    if (existing?.status === DocumentShareStatus.DECLINED && since(existing.respondedAt) < REASK_AFTER_DECLINE_MS) {
-      throw new ConflictException(`${org.name} declined your request; you can ask again 30 days after the decline`);
-    }
-    if (existing?.status === DocumentShareStatus.WITHDRAWN && since(existing.updatedAt) < REASK_AFTER_WITHDRAW_MS) {
-      throw new ConflictException('You withdrew this request recently; you can ask again 24 hours after withdrawing');
-    }
-    if (pending >= MAX_PENDING_SHARES) {
-      throw new BadRequestException(`You can have at most ${MAX_PENDING_SHARES} requests waiting; withdraw one first`);
-    }
-
-    let share;
-    if (existing) {
-      // WITHDRAWN or DECLINED long enough ago, or ACCEPTED but since removed from the staff bank: the worker may ask again.
-      const reopened = await this.prisma.documentShare.updateMany({
-        where: { id: existing.id, status: existing.status },
-        data: { status: DocumentShareStatus.PENDING, respondedAt: null, respondedById: null },
-      });
-      if (!reopened.count) throw new ConflictException('This request changed; reload and try again');
-      share = await this.prisma.documentShare.findUniqueOrThrow({ where: { id: existing.id }, include: { organization: ORG_SUMMARY } });
-    } else {
-      try {
-        share = await this.prisma.documentShare.create({
-          data: { reliefWorkerId: workerId, organizationId: org.id },
-          include: { organization: ORG_SUMMARY },
-        });
-      } catch (e) {
-        if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') throw new ConflictException(`You have already asked ${org.name}`);
-        throw e;
+    // The worker row lock serialises one worker's concurrent requests, so the waiting-request cap and the
+    // already-asked checks cannot be raced past (same pattern as booking, DECISIONS 2.4).
+    const { share, worker } = await this.prisma.$transaction(async (tx) => {
+      await lockWorker(tx, workerId);
+      const [worker, member, existing, pending] = await Promise.all([
+        tx.reliefProfile.findUniqueOrThrow({ where: { id: workerId }, select: { firstName: true, lastName: true, profession: true } }),
+        tx.staffBankMember.findUnique({ where: { organizationId_reliefWorkerId: { organizationId: org.id, reliefWorkerId: workerId } } }),
+        tx.documentShare.findUnique({ where: { reliefWorkerId_organizationId: { reliefWorkerId: workerId, organizationId: org.id } } }),
+        tx.documentShare.count({ where: { reliefWorkerId: workerId, status: DocumentShareStatus.PENDING } }),
+      ]);
+      if (member) throw new ConflictException(`You are already in ${org.name}'s staff bank`);
+      if (existing?.status === DocumentShareStatus.PENDING) throw new ConflictException(`You have already asked ${org.name}`);
+      const since = (d?: Date | null) => Date.now() - (d?.getTime() ?? 0);
+      if (existing?.status === DocumentShareStatus.DECLINED && since(existing.respondedAt) < REASK_AFTER_DECLINE_MS) {
+        throw new ConflictException(`${org.name} declined your request; you can ask again 30 days after the decline`);
       }
-    }
+      if (existing?.status === DocumentShareStatus.WITHDRAWN && since(existing.updatedAt) < REASK_AFTER_WITHDRAW_MS) {
+        throw new ConflictException('You withdrew this request recently; you can ask again 24 hours after withdrawing');
+      }
+      if (pending >= MAX_PENDING_SHARES) {
+        throw new BadRequestException(`You can have at most ${MAX_PENDING_SHARES} requests waiting; withdraw one first`);
+      }
+
+      if (existing) {
+        // WITHDRAWN or EXPIRED, DECLINED long enough ago, or ACCEPTED but since removed from the staff bank: the worker may ask again.
+        await tx.documentShare.update({
+          where: { id: existing.id },
+          data: { status: DocumentShareStatus.PENDING, respondedAt: null, respondedById: null },
+        });
+        return { worker, share: await tx.documentShare.findUniqueOrThrow({ where: { id: existing.id }, include: { organization: ORG_SUMMARY } }) };
+      }
+      return {
+        worker,
+        share: await tx.documentShare.create({ data: { reliefWorkerId: workerId, organizationId: org.id }, include: { organization: ORG_SUMMARY } }),
+      };
+    });
 
     await this.notifications.notifyOrgAdmins(org.id, {
       type: 'DOCUMENT_SHARE_REQUESTED',
@@ -101,7 +107,7 @@ export class DocumentSharesService {
       body: `${worker.firstName} ${worker.lastName} (${worker.profession})`,
       link: '/compliance',
     });
-    return share;
+    return { ...share, inStaffBank: false };
   }
 
   async withdraw(workerId: string, id: string) {

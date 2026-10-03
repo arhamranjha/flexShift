@@ -6,9 +6,9 @@ import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { DocumentSharesService } from './document-shares.service';
+import { AcceptDocumentShareDto, CreateDocumentShareDto, DocumentShareQueryDto } from './dto/document-share.dto';
 
 const SHARE_LIMIT = { default: { limit: Number(process.env.SHARE_THROTTLE_LIMIT) || 10, ttl: 60_000 } };
-import { AcceptDocumentShareDto, CreateDocumentShareDto, DocumentShareQueryDto } from './dto/document-share.dto';
 
 /** The signed-in worker's own requests (no worker id in the URL, like the rest of /relief-workers/me). */
 @UseGuards(JwtAuthGuard, RolesGuard)

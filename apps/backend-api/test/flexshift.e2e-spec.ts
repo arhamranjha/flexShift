@@ -1272,6 +1272,8 @@ describe('automation: cascade, expiry, notifications, checklists, benchmarks', (
       expect(await shareNotes(wT, 'DOCUMENT_SHARE_ACCEPTED')).toHaveLength(1);
       // removed from the bank later: the worker may ask that organization again
       await prisma.staffBankMember.delete({ where: { id: member.id } });
+      const afterRemoval = (await get(wT, '/relief-workers/me/document-shares').expect(200)).body.find((x: any) => x.id === share.id);
+      expect(afterRemoval).toMatchObject({ status: 'ACCEPTED', inStaffBank: false }); // the portal offers to ask again
       expect((await post(wT, '/relief-workers/me/document-shares', { organizationId: nzOrgId }).expect(201)).body.status).toBe('PENDING');
       await post(wT, `/relief-workers/me/document-shares/${share.id}/withdraw`).expect(201);
 
@@ -1334,6 +1336,50 @@ describe('automation: cascade, expiry, notifications, checklists, benchmarks', (
       for (const o of orgs.slice(0, 5)) await post(reg.accessToken, '/relief-workers/me/document-shares', { organizationId: o.id }).expect(201);
       const sixth = await post(reg.accessToken, '/relief-workers/me/document-shares', { organizationId: orgs[5].id }).expect(400);
       expect(sixth.body.message).toMatch(/at most 5/);
+
+      // the cap holds under concurrency too: a fresh worker sending six requests at once gets exactly five through
+      const reg2 = (await api().post('/auth/register/relief-worker').send({
+        email: `sharecap2-${Date.now()}@worker.test`, password: 'WorkerPass123!', firstName: 'Cap', lastName: 'Race', phone: '+64 21 555 0301', registrationNumber: `CAP2-${Date.now() % 1e7}`,
+      }).expect(201)).body;
+      const burst = await Promise.all(orgs.map((o) => post(reg2.accessToken, '/relief-workers/me/document-shares', { organizationId: o.id })));
+      expect(burst.filter((r) => r.status === 201)).toHaveLength(5);
+      expect(burst.filter((r) => r.status === 400)).toHaveLength(1);
+      expect(await prisma.documentShare.count({ where: { reliefWorkerId: reg2.user.reliefProfile.id, status: 'PENDING' } })).toBe(5);
+    });
+
+    it('document sharing: an unanswered request lapses after 30 days, and an organization without an admin is not a dead end', async () => {
+      const reg = (await api().post('/auth/register/relief-worker').send({
+        email: `shareexp-${Date.now()}@worker.test`, password: 'WorkerPass123!', firstName: 'Lapse', lastName: 'Worker', phone: '+64 21 555 0360', registrationNumber: `EXP-${Date.now() % 1e7}`,
+      }).expect(201)).body;
+      const wT = reg.accessToken as string;
+      const wId = reg.user.reliefProfile.id as string;
+
+      // with the NZ admin deactivated, the request reaches the NZ manager instead
+      const nzAdmin = await prisma.user.findUnique({ where: { email: 'admin@aotearoa.test' } });
+      await prisma.user.update({ where: { id: nzAdmin.id }, data: { isActive: false } });
+      let share: any;
+      try {
+        share = (await post(wT, '/relief-workers/me/document-shares', { organizationId: nzOrgId }).expect(201)).body;
+      } finally {
+        await prisma.user.update({ where: { id: nzAdmin.id }, data: { isActive: true } });
+      }
+      const mgrNotes = (await get(nzMgrT, '/notifications').expect(200)).body.items.filter((n: any) => n.type === 'DOCUMENT_SHARE_REQUESTED' && n.body.includes('Lapse Worker'));
+      expect(mgrNotes).toHaveLength(1);
+      await get(nzMgrT, `/relief-workers/${wId}`).expect(200);
+
+      // nothing lapses before 30 days; after that the organization loses sight of the worker, who is told and may ask again
+      const jobs = app.get(JobsService);
+      expect((await jobs.runShareExpiry()).expired).toBe(0);
+      await prisma.$executeRaw`UPDATE "DocumentShare" SET "updatedAt" = now() - interval '31 days' WHERE id = ${share.id}`;
+      expect((await jobs.runShareExpiry()).expired).toBe(1);
+      expect((await jobs.runShareExpiry()).expired).toBe(0); // runs are idempotent
+      expect((await prisma.documentShare.findUnique({ where: { id: share.id } })).status).toBe('EXPIRED');
+      await get(nzMgrT, `/relief-workers/${wId}`).expect(404);
+      await post(nzMgrT, `/document-shares/${share.id}/accept`, {}).expect(409);
+      const notes = (await get(wT, '/notifications').expect(200)).body.items.filter((n: any) => n.type === 'DOCUMENT_SHARE_EXPIRED');
+      expect(notes).toHaveLength(1);
+      expect((await post(wT, '/relief-workers/me/document-shares', { organizationId: nzOrgId }).expect(201)).body).toMatchObject({ id: share.id, status: 'PENDING' });
+      await post(wT, `/relief-workers/me/document-shares/${share.id}/withdraw`).expect(201);
     });
   });
 

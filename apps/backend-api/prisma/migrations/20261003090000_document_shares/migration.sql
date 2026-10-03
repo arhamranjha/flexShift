@@ -1,5 +1,5 @@
 -- CreateEnum
-CREATE TYPE "DocumentShareStatus" AS ENUM ('PENDING', 'ACCEPTED', 'DECLINED', 'WITHDRAWN');
+CREATE TYPE "DocumentShareStatus" AS ENUM ('PENDING', 'ACCEPTED', 'DECLINED', 'WITHDRAWN', 'EXPIRED');
 
 -- CreateTable
 CREATE TABLE "DocumentShare" (

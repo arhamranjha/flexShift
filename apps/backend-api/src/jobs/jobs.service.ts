@@ -1,10 +1,11 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
-import { DocStatus, ShiftStatus, ShiftVisibility } from '@prisma/client';
+import { DocStatus, DocumentShareStatus, ShiftStatus, ShiftVisibility } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { recomputeVerified } from '../relief-workers/verification';
 import { CASCADE_DELAY_MINUTES } from '../shifts/shifts.service';
+import { SHARE_PENDING_TTL_MS } from '../document-shares/document-shares.service';
 
 const DAY = 86_400_000;
 const OPEN = [ShiftStatus.OPEN, ShiftStatus.IN_NEGOTIATION];
@@ -29,6 +30,7 @@ export class JobsService {
   async expiryTick() {
     if (process.env.DISABLE_CRON === 'true') return;
     try { await this.runExpiry(); } catch (e) { this.log.error(`expiry failed: ${(e as Error).message}`); }
+    try { await this.runShareExpiry(); } catch (e) { this.log.error(`share expiry failed: ${(e as Error).message}`); }
   }
 
   /**
@@ -126,5 +128,33 @@ export class JobsService {
       }
     }
     return { expired: lapsed.length, warned };
+  }
+
+  /**
+   * A request to review documents that nobody answered within 30 days lapses: the organization loses access to the worker's
+   * documents (scope comes only from PENDING) and the worker is told and may ask again. Conditional per row, so a request
+   * answered at the same moment is left alone.
+   */
+  async runShareExpiry(now = new Date()) {
+    const stale = await this.prisma.documentShare.findMany({
+      where: { status: DocumentShareStatus.PENDING, updatedAt: { lte: new Date(now.getTime() - SHARE_PENDING_TTL_MS) } },
+      include: { organization: { select: { name: true } } },
+    });
+    let expired = 0;
+    for (const share of stale) {
+      const res = await this.prisma.documentShare.updateMany({
+        where: { id: share.id, status: DocumentShareStatus.PENDING, updatedAt: share.updatedAt },
+        data: { status: DocumentShareStatus.EXPIRED, respondedAt: now },
+      });
+      if (!res.count) continue;
+      expired++;
+      await this.notifications.notifyWorker(share.reliefWorkerId, {
+        type: 'DOCUMENT_SHARE_EXPIRED',
+        title: `${share.organization.name} did not answer your request`,
+        body: 'They can no longer see your documents. You can ask them again, or ask another organization.',
+        link: '/profile',
+      });
+    }
+    return { expired };
   }
 }
