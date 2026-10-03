@@ -1,7 +1,7 @@
 // Browser walkthrough of both apps against a running stack (API :4000, dashboard :3000, portal :3001).
 //   pnpm seed && AUTH_THROTTLE_LIMIT=1000 node dist/main.js ; next start -p 3000 ; next start -p 3001
 //   (the script logs in many times a minute, which the default login throttle of 10/min would reject)
-//   pnpm --filter e2e-ui walkthrough
+//   pnpm --filter e2e-ui walkthrough            (HEADED=1 to watch it in visible Chrome windows)
 // Uses the system Chrome (no browser download). Screenshots go to $SHOTS (default /tmp/fs-ui).
 import { chromium } from 'playwright-core';
 import { mkdirSync } from 'node:fs';
@@ -29,7 +29,9 @@ const step = async (name, fn) => {
   }
 };
 
-const browser = await chromium.launch({ executablePath: CHROME, headless: true });
+// HEADED=1 opens visible windows to watch the run; SLOWMO (ms, default 300 when headed) slows each action down.
+const HEADED = process.env.HEADED === '1';
+const browser = await chromium.launch({ executablePath: CHROME, headless: !HEADED, slowMo: Number(process.env.SLOWMO ?? (HEADED ? 300 : 0)) });
 
 async function newPage(label, viewport) {
   const ctx = await browser.newContext({ viewport, ignoreHTTPSErrors: true });
@@ -65,7 +67,8 @@ console.log('Dashboard (organization manager)');
     await page.getByLabel('Email').fill('richmond.mgr@apexhealth.co.uk');
     await page.getByLabel('Password').fill('wrong-password');
     await page.getByRole('button', { name: 'Sign in' }).click();
-    await page.getByRole('alert').waitFor({ timeout: 5000 });
+    // Next.js also renders an empty role="alert" route announcer, so match the alert that carries the error text.
+    await page.getByRole('alert').filter({ hasText: /invalid email or password/i }).waitFor({ timeout: 5000 });
   });
   await step('manager signs in and lands on the overview', async () => {
     await page.getByLabel('Password').fill(PW);
