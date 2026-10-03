@@ -33,6 +33,13 @@ deploy/create-admin.sh root@SERVER you@example.com
 ```
 Then sign in at `https://app.<domain>`. Do **not** run the demo seed on a real server.
 
+## Onboard a customer
+Until the dashboard has a "create organization" screen, run this in a normal Terminal window. It asks for the organization, its
+first branch, the owner's email and (optionally) a branch manager, then prints one-time temporary passwords:
+```bash
+SSH_OPTS="-i ~/.ssh/flexshift -o IdentitiesOnly=yes" deploy/create-org.sh root@SERVER
+```
+
 ## Backups
 ```bash
 ssh root@SERVER 'crontab -l 2>/dev/null; echo "15 3 * * * /opt/flexshift/deploy/backup.sh >> /var/log/flexshift-backup.log 2>&1"' | ssh root@SERVER crontab -

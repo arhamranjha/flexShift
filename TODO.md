@@ -38,6 +38,8 @@ Legend: [x] done · [~] partly done · [ ] not started
 - [ ] Modal-level a11y beyond focus trap (labelled landmarks, screen-reader pass)
 - [x] Clearing optional values (staff-bank custom rate)
 
+- [ ] "Create organization" screen for super admins in the dashboard (today: `deploy/create-org.sh`, backed by `dist/cli/create-org.js`)
+
 ## Worker portal (`apps/worker-portal`)
 - [x] Register (2-step) / login, feed (For you, Watching, Favourites, Emergencies, filters), shift detail (instant book, apply, negotiate, accept counter)
 - [x] My shifts diary (list + calendar, timesheet submission), finance (invoices, timesheets), compliance passport + upload + preferences

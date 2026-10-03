@@ -14,4 +14,4 @@ REMOTE_CMD="read -r ADMIN_PASSWORD && export ADMIN_PASSWORD ADMIN_EMAIL='$EMAIL'
 docker compose -f deploy/docker-compose.prod.yml --env-file deploy/.env exec -T \
 -e ADMIN_EMAIL -e ADMIN_PASSWORD -w /repo/apps/backend-api api node dist/cli/create-admin.js"
 
-printf '%s\n' "$PASS" | ${SSH:-ssh} "$TARGET" "bash -c \"$REMOTE_CMD\""
+printf '%s\n' "$PASS" | ssh ${SSH_OPTS:-} "$TARGET" "bash -c \"$REMOTE_CMD\""

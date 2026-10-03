@@ -6,6 +6,7 @@ import { configureApp } from '../src/bootstrap';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { JobsService } from '../src/jobs/jobs.service';
 import { MailerService } from '../src/notifications/mailer.service';
+import { createOrganization } from '../src/cli/create-org';
 
 const PW = 'FlexShiftPass2026!';
 const DAY = 86_400_000;
@@ -938,5 +939,40 @@ describe('automation: cascade, expiry, notifications, checklists, benchmarks', (
   it('answers the unauthenticated health probe with a database check', async () => {
     const res = await api().get('/health').expect(200);
     expect(res.body).toEqual({ status: 'ok' });
+  });
+
+  it('onboards a customer with the create-organization command', async () => {
+    const base = {
+      orgName: 'Kiwi Care Pharmacies', adminEmail: 'Owner@KiwiCare.test', phone: '+64 9 555 0100',
+      branchName: 'Ponsonby Pharmacy', branchCode: 'kiwi-pon-01', addressLine1: '12 Ponsonby Road', city: 'Auckland', postcode: '1011',
+      managerEmail: 'manager@kiwicare.test',
+    };
+    const out = await createOrganization(prisma as any, base);
+    expect(out.users.map((u) => u.role).sort()).toEqual(['FACILITY_MANAGER', 'ORG_ADMIN']);
+
+    const branch = await prisma.facilityBranch.findUnique({ where: { id: out.branchId }, include: { manager: true, organization: true } });
+    expect(branch.branchCode).toBe('KIWI-PON-01');
+    expect(branch.country).toBe('NZ');
+    expect(branch.manager.email).toBe('manager@kiwicare.test');
+    expect(branch.organization.billingEmail).toBe('owner@kiwicare.test'); // defaults to the admin's email
+
+    // the new people can sign in with their temporary password but must change it first
+    const mgr = out.users.find((u) => u.role === 'FACILITY_MANAGER');
+    const t = await login('manager@kiwicare.test', mgr.temporaryPassword);
+    expect((await get(t, '/auth/me').expect(200)).body.mustChangePassword).toBe(true);
+    await get(t, '/branches').expect(403);
+    const t2 = (await post(t, '/auth/change-password', { currentPassword: mgr.temporaryPassword, newPassword: 'KiwiManager123!' }).expect(200)).body.accessToken;
+    expect((await get(t2, '/branches').expect(200)).body.map((b: any) => b.id)).toEqual([out.branchId]); // sees only their branch
+
+    // tenants stay separate: the new manager cannot see Apex data
+    await get(t2, `/branches/${richmondId}`).expect(404);
+
+    // readable errors, and nothing half-created
+    const usersBefore = await prisma.user.count();
+    await expect(createOrganization(prisma as any, { ...base, branchCode: 'OTHER-1', adminEmail: 'x@y.test', managerEmail: undefined })).rejects.toThrow(/already exists/); // same name
+    await expect(createOrganization(prisma as any, { ...base, orgName: 'Another Org', adminEmail: 'z@y.test', managerEmail: undefined })).rejects.toThrow(/Branch code KIWI-PON-01 is already in use/);
+    await expect(createOrganization(prisma as any, { ...base, orgName: 'Third Org', branchCode: 'T-1', adminEmail: 'owner@kiwicare.test', managerEmail: undefined })).rejects.toThrow(/already has an account/);
+    await expect(createOrganization(prisma as any, { ...base, orgName: 'Fourth Org', branchCode: 'F-1', adminEmail: 'bad-email' })).rejects.toThrow(/valid email/);
+    expect(await prisma.user.count()).toBe(usersBefore);
   });
 });
