@@ -394,7 +394,7 @@ async function main() {
   }
 
   // Shifts above were created without a currency: they belong to the UK organizations.
-  await prisma.shift.updateMany({ data: { currency: 'GBP' } });
+  await prisma.shift.updateMany({ where: { branch: { organizationId: { in: [apexHealth.id, crestPharmacy.id] } } }, data: { currency: 'GBP' } });
   await prisma.reliefProfile.updateMany({ where: { registrationNumber: { startsWith: 'GPHC' } }, data: { country: 'GB' } });
 
   console.log('FlexShift database seeded successfully!');

@@ -235,7 +235,9 @@ export interface OverviewStats {
   upcomingBooked: number;
   fillRate: number | null;
   staffBankHeadcount: number;
-  monthSpend: number;
+  /** Null when invoices in more than one currency exist (see monthSpendByCurrency). */
+  monthSpend: number | null;
+  monthSpendByCurrency?: { currency: string; total: number }[];
   /** Currency of the totals; null when the organizations in scope use more than one. */
   currency?: string | null;
   pendingTimesheets: number;
@@ -258,8 +260,10 @@ export interface LoginResponse {
 }
 
 export interface FinanceSummary {
-  totalEarned: number;
-  pendingPayout: number;
+  /** Null when the worker has invoices in more than one currency: use byCurrency, totals are never mixed. */
+  totalEarned: number | null;
+  pendingPayout: number | null;
+  byCurrency?: { currency: string; totalEarned: number; pendingPayout: number }[];
   invoices: Invoice[];
 }
 

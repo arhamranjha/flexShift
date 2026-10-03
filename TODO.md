@@ -31,6 +31,7 @@ Legend: [x] done · [~] partly done · [ ] not started
 - [x] Markets as data: NZ (default) and GB; currency, timezone, tax, credentials and wording per market; shifts and invoices carry their currency
 - [ ] Confirm the NZ defaults with a pharmacy customer (regulator wording, police-vetting requirements, dispensing-system names, accreditations) and edit `common/markets.ts`
 - [ ] NZ privacy review before real worker documents are stored (Privacy Act 2020, IPP 12 for offshore hosting)
+- [ ] Per-currency totals are shown wherever amounts are summed; a reporting view per currency (and exchange handling) is not built
 - [ ] GST: invoices show no tax today; most contractors are probably not GST-registered, so the export defaults to "No GST"
 
 ## Organization dashboard (`apps/web-admin`)
@@ -44,7 +45,7 @@ Legend: [x] done · [~] partly done · [ ] not started
 - [ ] Modal-level a11y beyond focus trap (labelled landmarks, screen-reader pass)
 - [x] Clearing optional values (staff-bank custom rate)
 
-- [ ] "Create organization" screen for super admins in the dashboard (today: `deploy/create-org.sh`, backed by `dist/cli/create-org.js`)
+- [x] "Organizations" screen for super admins (list, market, admins' sign-in status; onboarding form that shows one-time passwords). `deploy/create-org.sh` remains for the command line
 
 ## Worker portal (`apps/worker-portal`)
 - [x] Register (2-step) / login, feed (For you, Watching, Favourites, Emergencies, filters), shift detail (instant book, apply, negotiate, accept counter)

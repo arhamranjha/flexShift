@@ -1,7 +1,7 @@
 'use client';
 
 import { Button, Card, EmptyState, ErrorBlock, LoadingBlock, Modal, StatusBadge, useAsync } from '@flexshift/ui';
-import { fmtDate, fmtRange, money, toNumber, type Invoice } from '@flexshift/api-client';
+import { fmtDate, fmtRange, money, moneyTotals, toNumber, type Invoice } from '@flexshift/api-client';
 import { Printer } from 'lucide-react';
 import { useState } from 'react';
 import { PageTitle } from '@/components/common';
@@ -24,8 +24,8 @@ export default function FinancePage() {
       {fin.loading && !fin.data ? <LoadingBlock /> : fin.error ? <ErrorBlock error={fin.error} retry={reload} /> : fin.data && (
         <div className="space-y-6">
           <div className="grid grid-cols-2 gap-3">
-            <Card className="p-4"><p className="text-xs font-semibold text-slate-500">Pending payout</p><p className="text-2xl font-extrabold text-amber-600 mt-1">{money(fin.data.pendingPayout, currency)}</p><p className="text-[11px] text-slate-500">Awaiting payment</p></Card>
-            <Card className="p-4"><p className="text-xs font-semibold text-slate-500">Total earned</p><p className="text-2xl font-extrabold text-emerald-700 mt-1">{money(fin.data.totalEarned, currency)}</p><p className="text-[11px] text-slate-500">Paid invoices</p></Card>
+            <Card className="p-4"><p className="text-xs font-semibold text-slate-500">Pending payout</p><p className="text-2xl font-extrabold text-amber-600 mt-1">{fin.data.byCurrency?.length ? moneyTotals(fin.data.byCurrency.map((c) => ({ amount: c.pendingPayout, currency: c.currency })), currency) : money(fin.data.pendingPayout ?? 0, currency)}</p><p className="text-[11px] text-slate-500">Awaiting payment</p></Card>
+            <Card className="p-4"><p className="text-xs font-semibold text-slate-500">Total earned</p><p className="text-2xl font-extrabold text-emerald-700 mt-1">{fin.data.byCurrency?.length ? moneyTotals(fin.data.byCurrency.map((c) => ({ amount: c.totalEarned, currency: c.currency })), currency) : money(fin.data.totalEarned ?? 0, currency)}</p><p className="text-[11px] text-slate-500">Paid invoices</p></Card>
           </div>
 
           <section>

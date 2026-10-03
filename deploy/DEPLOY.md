@@ -40,6 +40,12 @@ first branch, the owner's email and (optionally) a branch manager, then prints o
 SSH_OPTS="-i ~/.ssh/flexshift -o IdentitiesOnly=yes" deploy/create-org.sh root@SERVER
 ```
 
+## Upgrading
+`deploy/push.sh` rebuilds and restarts; database migrations run when the API starts. **The markets release defaults every existing
+organization to New Zealand (NZD, Pacific/Auckland)** and aligns existing invoices to their shift's currency. If a deployment already
+holds UK organizations, a platform admin must set their market to United Kingdom (Organizations screen, or the API) right after
+upgrading, otherwise they will require the NZ practising certificate. Run `deploy/backup.sh` on the server before upgrading.
+
 ## Backups
 ```bash
 ssh root@SERVER 'crontab -l 2>/dev/null; echo "15 3 * * * /opt/flexshift/deploy/backup.sh >> /var/log/flexshift-backup.log 2>&1"' | ssh root@SERVER crontab -

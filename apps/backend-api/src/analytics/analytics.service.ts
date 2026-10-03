@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { DocStatus, InvoiceStatus, LeaveStatus, NegotiationStatus, ShiftStatus, TimesheetStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AccessService, AuthUser } from '../common/access.service';
+import { zonedTime } from '../common/time';
 
 const DAY = 86_400_000;
 const OPEN = [ShiftStatus.OPEN, ShiftStatus.IN_NEGOTIATION];
@@ -23,9 +24,13 @@ export class AnalyticsService {
     const branchIds = branches.map((b) => b.id);
     const orgIds = [...new Set(branches.map((b) => b.organizationId))];
     const now = new Date();
-    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
     // Money totals are in one currency only when every organization in scope shares it.
-    const currencies = [...new Set((await this.prisma.organization.findMany({ where: { id: { in: orgIds } }, select: { currency: true } })).map((o) => o.currency))];
+    const orgs = await this.prisma.organization.findMany({ where: { id: { in: orgIds } }, select: { currency: true, timezone: true } });
+    const currencies = [...new Set(orgs.map((o) => o.currency))];
+    // "This month" starts at midnight on the 1st in the organization's own timezone (the first one when several are in scope).
+    const tz = orgs[0]?.timezone ?? 'UTC';
+    const ym = new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit' }).format(now).split('-').map(Number);
+    const monthStart = zonedTime(new Date(Date.UTC(ym[0], ym[1] - 1, 1)), 0, 0, tz);
 
     const inScope = { branchId: { in: branchIds } };
     const [openShifts, emergencyOpen, upcomingBooked, windowTotal, windowFilled, urgentShifts, staffBankHeadcount, monthSpend, pendingTimesheets, pendingLeave, pendingNegotiations, pendingDocuments] =
@@ -48,7 +53,8 @@ export class AnalyticsService {
         this.prisma.staffBankMember.count({
           where: { organizationId: { in: orgIds }, isActive: true, OR: [{ branchId: null }, { branchId: { in: branchIds } }] },
         }),
-        this.prisma.invoice.aggregate({
+        this.prisma.invoice.groupBy({
+          by: ['currency'],
           where: {
             timesheet: { branchId: { in: branchIds } },
             issuedAt: { gte: monthStart },
@@ -70,8 +76,11 @@ export class AnalyticsService {
       upcomingBooked,
       fillRate: windowTotal ? Math.round((windowFilled / windowTotal) * 100) : null,
       staffBankHeadcount,
-      monthSpend: Number(monthSpend._sum.totalAmount ?? 0),
-      currency: currencies.length === 1 ? currencies[0] : null,
+      // Amounts in different currencies are never added together: one total per invoice currency, and the single-number
+      // fields are only filled when there is exactly one currency.
+      monthSpendByCurrency: monthSpend.map((m) => ({ currency: m.currency, total: Number(m._sum.totalAmount ?? 0) })),
+      monthSpend: monthSpend.length <= 1 ? Number(monthSpend[0]?._sum.totalAmount ?? 0) : null,
+      currency: monthSpend.length === 1 ? monthSpend[0].currency : monthSpend.length === 0 && currencies.length === 1 ? currencies[0] : null,
       pendingTimesheets,
       pendingLeave,
       pendingNegotiations,

@@ -1,13 +1,13 @@
 'use client';
 
 import { Badge, Button, Field, Input, Modal, Select, Textarea, useAction, useAsync } from '@flexshift/ui';
-import { currencySymbol, money, type ReliefProfile, type StaffBankTier } from '@flexshift/api-client';
+import { currencySymbol, findMarket, money, type ReliefProfile, type StaffBankTier } from '@flexshift/api-client';
 import { Search, ShieldCheck } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { api, useAuth, useScope } from '@/lib/auth';
 import { useMarket } from '@/lib/market';
 
-export type WorkerPick = Pick<ReliefProfile, 'id' | 'firstName' | 'lastName' | 'profession' | 'registrationNumber' | 'isVerified'> & { hourlyRate?: ReliefProfile['hourlyRate'] };
+export type WorkerPick = Pick<ReliefProfile, 'id' | 'firstName' | 'lastName' | 'profession' | 'registrationNumber' | 'isVerified'> & { hourlyRate?: ReliefProfile['hourlyRate']; country?: ReliefProfile['country'] };
 
 export const TIERS: { value: StaffBankTier; label: string }[] = [
   { value: 'TIER_1_PREFERRED', label: 'Tier 1 Preferred' },
@@ -19,7 +19,7 @@ export function AddToStaffBankModal({
   open, onClose, onAdded, initialWorker,
 }: { open: boolean; onClose: () => void; onAdded: () => void; initialWorker?: WorkerPick | null }) {
   const { user } = useAuth();
-  const { currency, market } = useMarket();
+  const { currency, market, markets } = useMarket();
   const { branches, branchId: scopeBranch } = useScope();
   const { run, busy } = useAction();
   const isManager = user?.role === 'FACILITY_MANAGER';
@@ -173,7 +173,7 @@ export function AddToStaffBankModal({
           </Field>
           <Field
             label={`Custom hourly rate (${currencySymbol(currency)})`}
-            hint={picked.hourlyRate != null ? `Worker's standard rate: ${money(picked.hourlyRate, currency)}/hr. Leave empty to use it.` : 'Optional.'}
+            hint={picked.hourlyRate != null ? `Worker's standard rate: ${money(picked.hourlyRate, findMarket(markets, picked.country)?.currency ?? currency)}/hr. Leave empty to use it.` : 'Optional.'}
             error={rateInvalid ? 'Enter a positive number.' : undefined}
           >
             <Input type="number" min="0" step="0.01" value={rate} onChange={(e) => setRate(e.target.value)} />

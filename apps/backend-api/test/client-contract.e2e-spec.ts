@@ -178,7 +178,7 @@ describe('api-client against the live API', () => {
     const prisma = app.get(PrismaService);
     const start = new Date(Date.now() - 8 * 3_600_000), end = new Date(Date.now() - 1 * 3_600_000);
     const shift = await prisma.shift.create({
-      data: { branchId: richmondId, title: 'Contract finished', startTime: start, endTime: end, hourlyRate: 35, totalEstimatedPay: 245, status: 'BOOKED', assignedWorkerId: sarahId, visibility: 'PUBLIC_MARKETPLACE', requiredSystems: [], requiredAccreditations: [] },
+      data: { branchId: richmondId, currency: 'GBP', title: 'Contract finished', startTime: start, endTime: end, hourlyRate: 35, totalEstimatedPay: 245, status: 'BOOKED', assignedWorkerId: sarahId, visibility: 'PUBLIC_MARKETPLACE', requiredSystems: [], requiredAccreditations: [] },
     });
     const ts = await sarah.api.timesheets.submit({ shiftId: shift.id, clockInTime: start.toISOString(), clockOutTime: end.toISOString(), breakMinutes: 30, notes: 'busy' });
     expect((await sarah.api.timesheets.mine()).some((t) => t.id === ts.id)).toBe(true);
@@ -200,7 +200,7 @@ describe('api-client against the live API', () => {
     const prisma = app.get(PrismaService);
     const live = await prisma.shift.create({
       data: {
-        branchId: richmondId, title: 'Contract live shift', startTime: new Date(Date.now() - 2 * 3_600_000), endTime: new Date(Date.now() + 5 * 3_600_000),
+        branchId: richmondId, currency: 'GBP', title: 'Contract live shift', startTime: new Date(Date.now() - 2 * 3_600_000), endTime: new Date(Date.now() + 5 * 3_600_000),
         hourlyRate: 30, totalEstimatedPay: 210, status: 'BOOKED', assignedWorkerId: sarahId, visibility: 'PUBLIC_MARKETPLACE', requiredSystems: [], requiredAccreditations: [],
       },
     });

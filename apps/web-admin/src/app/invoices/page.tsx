@@ -1,6 +1,6 @@
 'use client';
 
-import { fmtDate, money, toNumber, type Invoice, type InvoiceStatus } from '@flexshift/api-client';
+import { fmtDate, money, moneyTotals, toNumber, type Invoice, type InvoiceStatus } from '@flexshift/api-client';
 import { Badge, Button, Card, EmptyState, ErrorBlock, Field, Input, LoadingBlock, Modal, StatusBadge, td, th, useAction, useAsync, useToast } from '@flexshift/ui';
 import clsx from 'clsx';
 import { Download, Printer } from 'lucide-react';
@@ -51,10 +51,14 @@ function InvoicesView() {
   const rows = all.filter((i) => tab === 'ALL' || i.status === tab);
 
   const now = new Date();
-  const outstanding = all.filter((i) => i.status === 'ISSUED').reduce((s, i) => s + toNumber(i.totalAmount), 0);
-  const paidMonth = all
-    .filter((i) => i.status === 'PAID' && i.paidAt && new Date(i.paidAt).getMonth() === now.getMonth() && new Date(i.paidAt).getFullYear() === now.getFullYear())
-    .reduce((s, i) => s + toNumber(i.totalAmount), 0);
+  // Totals are kept per currency: an organization or super admin can hold invoices in more than one.
+  const outstanding = moneyTotals(all.filter((i) => i.status === 'ISSUED').map((i) => ({ amount: i.totalAmount, currency: i.currency })), currency);
+  const paidMonth = moneyTotals(
+    all
+      .filter((i) => i.status === 'PAID' && i.paidAt && new Date(i.paidAt).getMonth() === now.getMonth() && new Date(i.paidAt).getFullYear() === now.getFullYear())
+      .map((i) => ({ amount: i.totalAmount, currency: i.currency })),
+    currency,
+  );
   const overdue = all.filter(isOverdue).length;
 
   const branchOf = (i: Invoice) => i.timesheet?.branch?.name ?? branches.find((b) => b.id === i.timesheet?.branchId)?.name ?? '-';
@@ -95,8 +99,8 @@ function InvoicesView() {
       <main className="p-8 space-y-6">
         <div className="grid gap-4 sm:grid-cols-3">
           {[
-            { l: 'Outstanding (issued)', v: money(outstanding, currency) },
-            { l: 'Paid this month', v: money(paidMonth, currency) },
+            { l: 'Outstanding (issued)', v: outstanding },
+            { l: 'Paid this month', v: paidMonth },
             { l: 'Overdue invoices', v: String(overdue), warn: overdue > 0 },
           ].map((c) => (
             <Card key={c.l} className="p-5">

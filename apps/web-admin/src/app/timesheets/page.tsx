@@ -1,6 +1,6 @@
 'use client';
 
-import { fmtDate, fmtRange, fmtTime, money, toNumber, type Timesheet, type TimesheetStatus } from '@flexshift/api-client';
+import { fmtDate, fmtRange, fmtTime, money, moneyTotals, toNumber, type Timesheet, type TimesheetStatus } from '@flexshift/api-client';
 import { Button, Card, EmptyState, ErrorBlock, LoadingBlock, Modal, StatusBadge, td, th, useAction, useAsync, useToast } from '@flexshift/ui';
 import clsx from 'clsx';
 import { AlertTriangle } from 'lucide-react';
@@ -77,7 +77,7 @@ export default function TimesheetsPage() {
     setConfirm(null); setDetail(null); reload();
   }
 
-  const confirmTotal = (confirm ?? []).reduce((s, t) => s + toNumber(t.totalPayout), 0);
+  const confirmTotal = moneyTotals((confirm ?? []).map((t) => ({ amount: t.totalPayout, currency: t.shift?.currency })), currency);
 
   return (
     <>
@@ -198,7 +198,7 @@ export default function TimesheetsPage() {
           <>
             <p className="text-sm text-slate-700">
               Approving {confirm.length === 1 ? 'this timesheet' : `${confirm.length} timesheets`} for a total payout of{' '}
-              <span className="font-bold">{money(confirmTotal, confirm?.[0]?.shift?.currency ?? currency)}</span>.
+              <span className="font-bold">{confirmTotal}</span>.
             </p>
             <p className="text-sm text-slate-600">{confirm.length === 1 ? 'An invoice' : 'Invoices'} will be generated automatically. This cannot be undone.</p>
           </>

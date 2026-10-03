@@ -3,7 +3,7 @@
 import type { Role } from '@flexshift/api-client';
 import clsx from 'clsx';
 import {
-  CalendarDays, Clock, FileCheck2, Handshake, LayoutDashboard, ListChecks, Palmtree, Receipt, Settings, ShieldCheck, UserSearch, Users,
+  Building2, CalendarDays, Clock, FileCheck2, Handshake, LayoutDashboard, ListChecks, Palmtree, Receipt, Settings, ShieldCheck, UserSearch, Users,
 } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
@@ -11,6 +11,7 @@ import { useAuth } from '@/lib/auth';
 
 const ALL: Role[] = ['SUPER_ADMIN', 'ORG_ADMIN', 'FACILITY_MANAGER'];
 const ADMINS: Role[] = ['SUPER_ADMIN', 'ORG_ADMIN'];
+const PLATFORM: Role[] = ['SUPER_ADMIN'];
 
 const navItems: { href: string; label: string; icon: typeof Users; roles: Role[] }[] = [
   { href: '/', label: 'Overview', icon: LayoutDashboard, roles: ALL },
@@ -23,6 +24,7 @@ const navItems: { href: string; label: string; icon: typeof Users; roles: Role[]
   { href: '/timesheets', label: 'Timesheet Approvals', icon: Clock, roles: ALL },
   { href: '/invoices', label: 'Billing & Invoices', icon: Receipt, roles: ADMINS },
   { href: '/leave', label: 'Leave Management', icon: Palmtree, roles: ALL },
+  { href: '/organizations', label: 'Organizations', icon: Building2, roles: PLATFORM },
   { href: '/settings', label: 'Settings', icon: Settings, roles: ADMINS },
 ];
 

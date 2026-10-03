@@ -1,8 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { Prisma, Role, ShiftVisibility } from '@prisma/client';
+import { DocStatus, Prisma, Role, ShiftVisibility } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { MailerService } from './mailer.service';
-import { formatMoney } from '../common/markets';
+import { formatMoney, marketFor } from '../common/markets';
 
 export interface NotificationInput {
   type: string;
@@ -95,6 +95,27 @@ export class NotificationsService {
     await this.notifyUsers([...admins.map((a) => a.id), ...(branch.managerId ? [branch.managerId] : [])], n);
   }
 
+  /**
+   * Narrows a worker query to those who hold every extra credential the shift's organization needs (its market's own, such as
+   * the NZ practising certificate, plus anything the organization adds), so alerts do not go to workers who would be refused.
+   */
+  private async canBookWhere(branchId: string, where: Prisma.ReliefProfileWhereInput): Promise<Prisma.ReliefProfileWhereInput> {
+    const branch = await this.prisma.facilityBranch.findUnique({
+      where: { id: branchId },
+      select: { organization: { select: { country: true, requiredDocTypes: true } } },
+    });
+    const extras = [...new Set([...marketFor(branch?.organization.country).extraMandatoryDocs, ...(branch?.organization.requiredDocTypes ?? [])])];
+    const now = new Date();
+    return {
+      AND: [
+        where,
+        ...extras.map((type) => ({
+          documents: { some: { type, status: DocStatus.VERIFIED, OR: [{ expiresAt: null }, { expiresAt: { gt: now } }] } },
+        })),
+      ],
+    };
+  }
+
   /** Pages through every matching worker in a stable order (capped at 5000 so one shift cannot fan out forever). */
   private async workerUserIds(where: Prisma.ReliefProfileWhereInput) {
     const ids: string[] = [];
@@ -133,14 +154,14 @@ export class NotificationsService {
   }
 
   /** Verified workers of the right profession whose minimum rate threshold this shift meets. */
-  async notifyRateMatches(shift: { id: string; title: string; roleRequired: string; hourlyRate: unknown; visibility: ShiftVisibility; currency?: string }) {
+  async notifyRateMatches(shift: { id: string; title: string; branchId: string; roleRequired: string; hourlyRate: unknown; visibility: ShiftVisibility; currency?: string }) {
     if (shift.visibility === ShiftVisibility.STAFF_BANK_ONLY) return;
-    const userIds = await this.workerUserIds({
+    const userIds = await this.workerUserIds(await this.canBookWhere(shift.branchId, {
       isVerified: true,
       profession: shift.roleRequired,
       minimumShiftRate: { not: null, lte: Number(shift.hourlyRate) },
       user: { isActive: true },
-    });
+    }));
     await this.notifyUsers(userIds, {
       type: 'SHIFT_MATCH',
       title: 'A shift meets your minimum rate',
@@ -153,8 +174,8 @@ export class NotificationsService {
    * Emergency broadcasts ignore minimum-rate thresholds: every verified, active worker of the right
    * profession is told straight away.
    */
-  async notifyEmergency(shift: { id: string; title: string; roleRequired: string; hourlyRate: unknown; currency?: string }) {
-    const userIds = await this.workerUserIds({ isVerified: true, profession: shift.roleRequired, user: { isActive: true } });
+  async notifyEmergency(shift: { id: string; title: string; branchId: string; roleRequired: string; hourlyRate: unknown; currency?: string }) {
+    const userIds = await this.workerUserIds(await this.canBookWhere(shift.branchId, { isVerified: true, profession: shift.roleRequired, user: { isActive: true } }));
     await this.notifyUsers(userIds, {
       type: 'EMERGENCY_SHIFT',
       title: 'Emergency shift needs cover',

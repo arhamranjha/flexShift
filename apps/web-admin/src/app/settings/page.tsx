@@ -162,7 +162,7 @@ function SettingsView() {
             {org.loading ? <LoadingBlock /> : !orgId ? <p className="text-sm text-slate-500">Market settings apply to an organization. Sign in as an organization admin to change them.</p> : (
               <div className="grid gap-4 max-w-xl">
                 <Field label="Country / market">
-                  <Select value={country} onChange={(e) => setCountry(e.target.value)}>
+                  <Select value={country} disabled={user?.role !== 'SUPER_ADMIN'} onChange={(e) => setCountry(e.target.value)}>
                     {!country && <option value="">Select a market</option>}
                     {(mkt.markets?.markets ?? []).map((m) => <option key={m.code} value={m.code}>{m.name}</option>)}
                   </Select>
@@ -177,7 +177,11 @@ function SettingsView() {
                 <p className="text-xs text-slate-500">
                   Changing the market affects new shifts, invoices and credential wording from now on. Existing shifts and invoices keep the currency they were created with.
                 </p>
-                <div><Button loading={savingMarket} disabled={!country || country === org.data?.country} onClick={saveMarket}>Save market</Button></div>
+                {user?.role === 'SUPER_ADMIN' ? (
+                  <div><Button loading={savingMarket} disabled={!country || country === org.data?.country} onClick={saveMarket}>Save market</Button></div>
+                ) : (
+                  <p className="text-xs font-semibold text-slate-600">The market is set by the platform administrators because it decides which credentials workers must hold. Contact support to change it.</p>
+                )}
               </div>
             )}
           </div>

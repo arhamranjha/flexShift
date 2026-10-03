@@ -22,3 +22,14 @@ export const fmtRange = (start: string, end: string) => `${fmtDate(start)} · ${
 
 export const titleCase = (s: string) =>
   s.toLowerCase().replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+
+/**
+ * Totals per currency as one readable string, e.g. "$300.00 + £150.00". Amounts in different currencies are never added
+ * together; with no rows it shows zero in the fallback currency.
+ */
+export function moneyTotals(rows: { amount: Money | null | undefined; currency?: string | null }[], fallbackCurrency: string = DEFAULT_CURRENCY): string {
+  const totals = new Map<string, number>();
+  for (const r of rows) totals.set(r.currency || fallbackCurrency, (totals.get(r.currency || fallbackCurrency) ?? 0) + toNumber(r.amount));
+  if (totals.size === 0) return money(0, fallbackCurrency);
+  return Array.from(totals.entries()).map(([currency, total]) => money(total, currency)).join(' + ');
+}

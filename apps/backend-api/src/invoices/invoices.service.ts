@@ -43,10 +43,18 @@ export class InvoicesService {
       orderBy: { issuedAt: 'desc' },
     });
 
-    const sum = (status: InvoiceStatus) =>
-      invoices.filter((i) => i.status === status).reduce((acc, i) => acc + Number(i.totalAmount), 0);
-
-    return { totalEarned: sum(InvoiceStatus.PAID), pendingPayout: sum(InvoiceStatus.ISSUED), invoices };
+    // Totals never mix currencies: one line per currency. The single-number fields are only set when there is one.
+    const sum = (status: InvoiceStatus, currency?: string) =>
+      invoices.filter((i) => i.status === status && (!currency || i.currency === currency)).reduce((acc, i) => acc + Number(i.totalAmount), 0);
+    const currencies = [...new Set(invoices.map((i) => i.currency))];
+    const byCurrency = currencies.map((currency) => ({ currency, totalEarned: sum(InvoiceStatus.PAID, currency), pendingPayout: sum(InvoiceStatus.ISSUED, currency) }));
+    const single = currencies.length <= 1;
+    return {
+      totalEarned: single ? sum(InvoiceStatus.PAID) : null,
+      pendingPayout: single ? sum(InvoiceStatus.ISSUED) : null,
+      byCurrency,
+      invoices,
+    };
   }
 
   async markPaid(user: AuthUser, id: string, paymentReference: string) {

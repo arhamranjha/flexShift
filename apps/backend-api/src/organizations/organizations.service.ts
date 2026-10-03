@@ -1,10 +1,10 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { Role } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AccessService, AuthUser } from '../common/access.service';
 import { marketFor } from '../common/markets';
 import { CreateOrganizationDto, OnboardOrganizationDto, UpdateOrganizationDto } from './dto/organization.dto';
-import { createOrganization } from './onboarding';
+import { createOrganization, OnboardingError } from './onboarding';
 
 @Injectable()
 export class OrganizationsService {
@@ -41,8 +41,8 @@ export class OrganizationsService {
     try {
       return await createOrganization(this.prisma, input);
     } catch (e) {
-      // The onboarding core checks everything up front and explains problems in plain words.
-      if (e instanceof Error && !(e as { code?: string }).code) throw new BadRequestException(e.message);
+      // Only problems with the request are shown to the caller; anything else is a server fault and stays a 500.
+      if (e instanceof OnboardingError) throw new BadRequestException(e.message);
       throw e;
     }
   }
@@ -54,6 +54,10 @@ export class OrganizationsService {
 
   async update(user: AuthUser, id: string, dto: UpdateOrganizationDto) {
     this.access.assertOrg(user, id);
+    // The market decides which credentials are mandatory, so it must not be switchable by the organization it governs.
+    if (dto.country !== undefined && user.role !== Role.SUPER_ADMIN) {
+      throw new ForbiddenException('Only platform administrators can change an organization\'s market');
+    }
     const market = dto.country ? marketFor(dto.country) : null;
     return this.prisma.organization.update({
       where: { id },

@@ -323,7 +323,7 @@ describe('timesheets, invoices and payment', () => {
     const end = new Date(Date.now() - 1 * 3_600_000);
     const shift = await prisma.shift.create({
       data: {
-        branchId: richmondId, title: 'Finished shift', startTime: start, endTime: end, hourlyRate: 36, totalEstimatedPay: 288,
+        branchId: richmondId, currency: 'GBP', title: 'Finished shift', startTime: start, endTime: end, hourlyRate: 36, totalEstimatedPay: 288,
         status: 'BOOKED', assignedWorkerId: sarahId, visibility: 'PUBLIC_MARKETPLACE', requiredSystems: [], requiredAccreditations: [],
       },
     });
@@ -519,7 +519,7 @@ describe('review-loop regressions', () => {
     const end = new Date(Date.now() - 1 * 3_600_000);
     const shift = await prisma.shift.create({
       data: {
-        branchId: richmondId, title: 'Released shift', startTime: start, endTime: end, hourlyRate: 30, totalEstimatedPay: 150,
+        branchId: richmondId, currency: 'GBP', title: 'Released shift', startTime: start, endTime: end, hourlyRate: 30, totalEstimatedPay: 150,
         status: 'BOOKED', assignedWorkerId: davidId, visibility: 'PUBLIC_MARKETPLACE', requiredSystems: [], requiredAccreditations: [],
       },
     });
@@ -669,7 +669,7 @@ describe('automation: cascade, expiry, notifications, checklists, benchmarks', (
     const jobs = app.get(JobsService);
     const shift = await prisma.shift.create({
       data: {
-        branchId: richmondId, title: 'Already started', startTime: new Date(Date.now() - 3_600_000), endTime: new Date(Date.now() + 3_600_000),
+        branchId: richmondId, currency: 'GBP', title: 'Already started', startTime: new Date(Date.now() - 3_600_000), endTime: new Date(Date.now() + 3_600_000),
         hourlyRate: 30, totalEstimatedPay: 60, status: 'OPEN', visibility: 'STAFF_BANK_ONLY', requiredSystems: [], requiredAccreditations: [],
         cascadeStage: 1, nextCascadeAt: new Date(Date.now() - 1000),
       },
@@ -744,7 +744,7 @@ describe('automation: cascade, expiry, notifications, checklists, benchmarks', (
     const mk = (title: string, startOffsetH: number, endOffsetH: number, worker = sarahId) =>
       prisma.shift.create({
         data: {
-          branchId: richmondId, title, startTime: new Date(Date.now() + startOffsetH * 3_600_000), endTime: new Date(Date.now() + endOffsetH * 3_600_000),
+          branchId: richmondId, currency: 'GBP', title, startTime: new Date(Date.now() + startOffsetH * 3_600_000), endTime: new Date(Date.now() + endOffsetH * 3_600_000),
           hourlyRate: 40, totalEstimatedPay: 320, status: 'BOOKED', assignedWorkerId: worker, visibility: 'PUBLIC_MARKETPLACE', requiredSystems: [], requiredAccreditations: [],
         },
       });
@@ -820,7 +820,7 @@ describe('automation: cascade, expiry, notifications, checklists, benchmarks', (
     const start = new Date(end.getTime() - 8 * 3_600_000);
     const shift = await prisma.shift.create({
       data: {
-        branchId: richmondId, title: 'Forgot to clock out', startTime: start, endTime: end, hourlyRate: 30, totalEstimatedPay: 240,
+        branchId: richmondId, currency: 'GBP', title: 'Forgot to clock out', startTime: start, endTime: end, hourlyRate: 30, totalEstimatedPay: 240,
         status: 'IN_PROGRESS', assignedWorkerId: sarahId, workerClockInAt: start, visibility: 'PUBLIC_MARKETPLACE', requiredSystems: [], requiredAccreditations: [],
       },
     });
@@ -1079,13 +1079,17 @@ describe('automation: cascade, expiry, notifications, checklists, benchmarks', (
       expect((await get(adminT, '/analytics/overview').expect(200)).body.currency).toBe('GBP');
     });
 
-    it('lets an org admin change the market, applying its currency and timezone (existing shifts keep theirs)', async () => {
-      await patch(nzAdminT, `/organizations/${nzOrgId}`, { country: 'FR' }).expect(400);
+    it('lets only a platform admin change the market, applying its currency and timezone (existing shifts keep theirs)', async () => {
+      // The market decides which credentials are mandatory, so the organization it governs cannot change it itself
+      await patch(nzAdminT, `/organizations/${nzOrgId}`, { country: 'GB' }).expect(403);
+      await patch(nzMgrT, `/organizations/${nzOrgId}`, { country: 'GB' }).expect(403);
+      await patch(nzAdminT, `/organizations/${nzOrgId}`, { name: 'Aotearoa Pharmacies Ltd' }).expect(200); // other settings still editable
+      await patch(superT, `/organizations/${nzOrgId}`, { country: 'FR' }).expect(400);
       const before = await prisma.shift.findFirst({ where: { branchId: nzBranchId } });
-      const uk = (await patch(nzAdminT, `/organizations/${nzOrgId}`, { country: 'GB' }).expect(200)).body;
+      const uk = (await patch(superT, `/organizations/${nzOrgId}`, { country: 'GB' }).expect(200)).body;
       expect(uk).toMatchObject({ country: 'GB', currency: 'GBP', timezone: 'Europe/London' });
       expect((await prisma.shift.findUnique({ where: { id: before.id } })).currency).toBe('NZD');
-      const back = (await patch(nzAdminT, `/organizations/${nzOrgId}`, { country: 'NZ' }).expect(200)).body;
+      const back = (await patch(superT, `/organizations/${nzOrgId}`, { country: 'NZ' }).expect(200)).body;
       expect(back).toMatchObject({ country: 'NZ', currency: 'NZD', timezone: 'Pacific/Auckland' });
     });
 
@@ -1125,6 +1129,37 @@ describe('automation: cascade, expiry, notifications, checklists, benchmarks', (
       const tok = def.accessToken;
       expect((await patch(tok, '/relief-workers/me/preferences', { country: 'GB' }).expect(200)).body.country).toBe('GB');
     });
+
+    it('never adds amounts in different currencies together', async () => {
+      // David already has an NZD invoice from the NZ tests; give him a paid GBP one as well
+      await prisma.invoice.create({ data: { invoiceNumber: `INV-MIX-${Date.now()}`, organizationId: apexId, reliefWorkerId: davidId, totalAmount: 100, currency: 'GBP', status: 'PAID', paidAt: new Date() } });
+      const fin = (await get(davidT, '/invoices/my-finance').expect(200)).body;
+      expect(fin.byCurrency.map((c: any) => c.currency).sort()).toEqual(['GBP', 'NZD']);
+      expect(fin.totalEarned).toBeNull(); // no single number when the currencies differ
+      expect(fin.byCurrency.find((c: any) => c.currency === 'GBP').totalEarned).toBe(100);
+
+      // the dashboard spend for an organization is split by invoice currency, with no summed total
+      const start = new Date(Date.now() - 6 * 3_600_000), end = new Date(Date.now() - 3_600_000);
+      const sh = await prisma.shift.create({ data: { branchId: nzBranchId, title: 'Old GBP shift', startTime: start, endTime: end, hourlyRate: 30, totalEstimatedPay: 150, currency: 'GBP', status: 'COMPLETED', assignedWorkerId: davidId, visibility: 'PUBLIC_MARKETPLACE', requiredSystems: [], requiredAccreditations: [] } });
+      const ts = await prisma.timesheet.create({ data: { shiftId: sh.id, reliefWorkerId: davidId, branchId: nzBranchId, clockInTime: start, clockOutTime: end, billableHours: 5, hourlyRateApplied: 30, totalPayout: 150, status: 'APPROVED' } });
+      await prisma.invoice.create({ data: { invoiceNumber: `INV-MIX2-${Date.now()}`, organizationId: nzOrgId, reliefWorkerId: davidId, timesheetId: ts.id, totalAmount: 150, currency: 'GBP', status: 'ISSUED' } });
+      const ov = (await get(nzAdminT, '/analytics/overview').expect(200)).body;
+      expect(ov.monthSpendByCurrency.map((m: any) => m.currency).sort()).toEqual(['GBP', 'NZD']);
+      expect(ov.monthSpend).toBeNull();
+      expect(ov.currency).toBeNull();
+    });
+
+    it('sends emergency alerts only to workers who would be allowed to book', async () => {
+      // David holds the NZ practising certificate (added in an earlier test); Sarah does not
+      const nzEmergency = (await post(nzMgrT, '/shifts', { branchId: nzBranchId, title: 'NZ emergency', startTime: at(90, 9), endTime: at(90, 17), hourlyRate: 60, visibility: 'EMERGENCY_BROADCAST', isEmergency: true }).expect(201)).body;
+      const gotIt = async (t: string, shiftId: string) => (await get(t, '/notifications').expect(200)).body.items.some((n: any) => n.type === 'EMERGENCY_SHIFT' && n.link === `/shifts/${shiftId}`);
+      expect(await gotIt(davidT, nzEmergency.id)).toBe(true);
+      expect(await gotIt(sarahT, nzEmergency.id)).toBe(false); // she would be refused (no practising certificate), so she is not alerted
+      // a UK shift has no such rule: both are alerted
+      const ukEmergency = (await post(richmondT, '/shifts', { branchId: richmondId, title: 'UK emergency', startTime: at(91, 9), endTime: at(91, 17), hourlyRate: 40, visibility: 'EMERGENCY_BROADCAST', isEmergency: true }).expect(201)).body;
+      expect(await gotIt(davidT, ukEmergency.id)).toBe(true);
+      expect(await gotIt(sarahT, ukEmergency.id)).toBe(true);
+    });
   });
 
   it('lets a super admin onboard a customer through the API, and nobody else', async () => {
@@ -1158,5 +1193,18 @@ describe('automation: cascade, expiry, notifications, checklists, benchmarks', (
     expect(created.users[0].mustChangePassword).toBe(true);
     expect(all.length).toBeGreaterThan(2);
     expect((await get(adminT, '/organizations').expect(200)).body.map((o: any) => o.id)).toEqual([apexId]);
+  });
+
+  it('onboarding: simultaneous identical requests create exactly one organization, the other gets a clear 400', async () => {
+    const body = (admin: string) => ({
+      orgName: 'Race Pharmacy', adminEmail: admin, phone: '+64 9 555 0199', branchName: 'Race Branch', branchCode: 'RACE-01',
+      addressLine1: '1 Race Road', city: 'Hamilton', postcode: '3200',
+    });
+    const [a, b] = await Promise.all([post(superT, '/organizations/onboard', body('a@race.test')), post(superT, '/organizations/onboard', body('b@race.test'))]);
+    expect([a.status, b.status].sort()).toEqual([201, 400]);
+    const loser = a.status === 400 ? a : b;
+    expect(loser.body.message).toMatch(/already exists|already in use|just created/);
+    expect(await prisma.organization.count({ where: { slug: 'race-pharmacy' } })).toBe(1);
+    expect(await prisma.facilityBranch.count({ where: { branchCode: 'RACE-01' } })).toBe(1);
   });
 });

@@ -1,6 +1,6 @@
 'use client';
 
-import { fmtRange, money } from '@flexshift/api-client';
+import { fmtRange, money, moneyTotals } from '@flexshift/api-client';
 import { Badge, Card, CardHeader, EmptyState, ErrorBlock, LoadingBlock, StatusBadge, useAsync } from '@flexshift/ui';
 import {
   AlertOctagon, CalendarCheck, CalendarClock, ChevronRight, Clock, FileCheck2, Handshake, Palmtree, Banknote, Target, Users,
@@ -63,7 +63,7 @@ export default function OverviewPage() {
                 hint={data.fillRate === null ? 'No shifts in the last 30 days' : undefined}
               />
               <Stat label="Staff bank headcount" value={data.staffBankHeadcount} icon={<Users className="w-5 h-5" />} tone="violet" href="/staff-bank" />
-              <Stat label="Spend this month" value={money(data.monthSpend, data.currency ?? currency)} icon={<Banknote className="w-5 h-5" />} />
+              <Stat label="Spend this month" value={data.monthSpendByCurrency?.length ? moneyTotals(data.monthSpendByCurrency.map((m) => ({ amount: m.total, currency: m.currency })), currency) : money(data.monthSpend ?? 0, data.currency ?? currency)} icon={<Banknote className="w-5 h-5" />} />
               <Stat label="Pending timesheets" value={data.pendingTimesheets} icon={<Clock className="w-5 h-5" />} tone="amber" href="/timesheets" />
               <Stat label="Pending leave" value={data.pendingLeave} icon={<Palmtree className="w-5 h-5" />} tone="amber" href="/leave" />
               <Stat label="Pending negotiations" value={data.pendingNegotiations} icon={<Handshake className="w-5 h-5" />} tone="violet" href="/negotiations" />
