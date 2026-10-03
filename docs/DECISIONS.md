@@ -64,9 +64,21 @@ registration number and adds them to the staff bank** (`GET /relief-workers/look
 documents. A worker cannot apply to shifts until verified, so there is no other path. **Decision (2026-10-03, owner): build both paths, operator first.**
 (1) *Operator verification — built.* The platform operator (super admin) sees every worker's pending documents in the Compliance Desk (a
 "platform queue" banner, worker email/country, search) and is notified in-app (`DOCUMENT_UPLOADED`) when a worker uploads. Verifying makes the
-worker bookable wherever the rules are met and notifies them. Organizations still see only workers in their scope, so one organization cannot
-verify strangers. (2) *Worker-initiated "share my documents with this organization" request — not built yet*; it scales without the operator
-and is the next step once there are customers (TODO.md). Cost of (1): the operator is a bottleneck by design.
+worker bookable wherever the rules are met and notifies them. Organizations still see only workers in their scope, so an organization cannot
+verify strangers who have not asked it or applied to it. (2) *Worker-initiated "share my documents with this organization" request — built (2026-10-03).* A worker asks an
+organization, by its code (shown in Settings) or from any of its shift pages (`DocumentShare`, `/relief-workers/me/document-shares`). While the
+request is **PENDING** the organization has the worker in `workerScope` and can review and verify their documents; **accepting** adds the worker
+to its staff bank (which keeps them in scope), **declining** or the worker **withdrawing** removes them from scope again. Choices: scope comes
+only from PENDING (an accepted request does not keep a worker visible after the organization removes them from its bank, they may ask again);
+a decline stands for 30 days and only organization admins may decline (a branch manager misclick should not lock a worker out); after
+withdrawing, a worker waits 24 hours before asking the same organization again, and asking is throttled (`SHARE_THROTTLE_LIMIT`, 10/min), because
+every request notifies the organization's admins; at most 5 requests may wait at once (no spraying every organization); accepting is allowed
+before the documents are verified (the eligibility gate still blocks booking); a deactivated organization loses pending workers from scope.
+Request emails never contain the worker's name (it is typed by a stranger; see 2.9). Because any organization a worker asks can now see
+their profile, staff only see *who* verified a document when the verifier is from their own organization, and only their own branches among
+the worker's favourites. Cost of (1): the operator is a bottleneck by design.
+Cost of (2): verification is still **global**, so an organization a worker asked can verify documents that then count everywhere; per-organization
+verification remains open (TODO.md).
 
 ### 2.7 Sessions: HttpOnly cookies, one per app, CSRF header; bearer still accepted
 Browser apps hold no token in JavaScript-readable storage. Login/register/change-password set `fs_admin` or `fs_worker` (HttpOnly,

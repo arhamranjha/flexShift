@@ -25,7 +25,11 @@ const EMAILED_TYPES = new Set([
 ]);
 
 /** Types whose body contains text typed by a manager or a worker: emailed with a link only, never the text. */
-const FREE_TEXT_TYPES = new Set(['EMERGENCY_SHIFT', 'SHIFT_BOOKED', 'WORKER_COMPLIANCE_LAPSED', 'DOCUMENT_REJECTED', 'NEGOTIATION_PROPOSED']);
+const FREE_TEXT_TYPES = new Set([
+  'EMERGENCY_SHIFT', 'SHIFT_BOOKED', 'WORKER_COMPLIANCE_LAPSED', 'DOCUMENT_REJECTED', 'NEGOTIATION_PROPOSED',
+  // names typed by a self-registered stranger, or an organization name typed by its admin
+  'DOCUMENT_SHARE_REQUESTED', 'DOCUMENT_SHARE_ACCEPTED', 'DOCUMENT_SHARE_DECLINED',
+]);
 
 const trimSlash = (u: string) => u.replace(/\/+$/, '');
 

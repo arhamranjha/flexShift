@@ -171,14 +171,15 @@ describe('api-client against the live API', () => {
     const share = await self.api.documentShares.create({ organizationCode: org.code });
     expect(share).toMatchObject({ status: 'PENDING', organization: { id: orgId } });
     expect((await self.api.documentShares.mine()).map((s) => s.id)).toEqual([share.id]);
-    expect((await self.api.documentShares.withdraw(share.id)).status).toBe('WITHDRAWN');
-    await self.api.documentShares.create({ organizationId: orgId });
+    const other = await self.api.documentShares.create({ organizationCode: 'CREST-UK' });
+    expect((await self.api.documentShares.withdraw(other.id)).status).toBe('WITHDRAWN');
 
     const listed = (await mgr.api.documentShares.list({ status: 'PENDING' })).find((s) => s.id === share.id)!;
     expect(listed.reliefWorker!.lastName).toBe('Share');
     expect(Array.isArray(listed.reliefWorker!.documents)).toBe(true);
     expect((await admin.api.documentShares.accept(share.id, { tier: 'TIER_3_RESERVE', branchId: richmondId })).status).toBe('ACCEPTED');
-    await expect(mgr.api.documentShares.decline(share.id)).rejects.toMatchObject({ status: 409 });
+    await expect(admin.api.documentShares.decline(share.id)).rejects.toMatchObject({ status: 409 });
+    await expect(mgr.api.documentShares.decline(other.id)).rejects.toMatchObject({ status: 403 }); // declining is for organization admins
     const member = (await admin.api.staffBank.list(orgId)).find((m) => m.reliefWorkerId === reg.user.reliefProfile!.id)!;
     expect(member).toMatchObject({ tier: 'TIER_3_RESERVE', branchId: richmondId });
     await admin.api.staffBank.remove(member.id);

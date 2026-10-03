@@ -71,11 +71,14 @@ function ShareRow({ share, onChanged }: { share: DocumentShare; onChanged: () =>
 
 /** Shift page: lets an unverified worker ask the shift's organization to review their documents. */
 export function AskOrganizationCard({ organizationId, organizationName }: { organizationId: string; organizationName: string }) {
-  const { data: shares, reload } = useAsync(() => api.documentShares.mine(), []);
+  const { data: shares, error, reload } = useAsync(() => api.documentShares.mine(), []);
   const { run, busy } = useAction();
   const existing = shares?.find((s) => s.organizationId === organizationId);
-  // Withdrawn requests can be sent again; anything else is shown as it stands.
-  const canAsk = shares !== undefined && (!existing || existing.status === 'WITHDRAWN');
+  // Withdrawn requests, and declines more than 30 days old, can be sent again (the server enforces the waiting times).
+  const declineOver = existing?.status === 'DECLINED' && Date.now() - new Date(existing.respondedAt ?? 0).getTime() > 30 * 86_400_000;
+  const canAsk = shares !== undefined && (!existing || existing.status === 'WITHDRAWN' || declineOver);
+
+  if (error) return <Card className="p-4"><ErrorBlock error={error} retry={reload} /></Card>;
 
   return (
     <Card className="p-4 space-y-2 border-amber-200 bg-amber-50/50">

@@ -109,6 +109,7 @@ export default function CompliancePage() {
   const { docLabel } = useMarket();
   const { user } = useAuth();
   const [search, setSearch] = useState('');
+  const [reviewed, setReviewed] = useState(0); // bumps when a document is reviewed, so the request counts refresh
   const { data: all, error, loading, reload } = useAsync(() => api.workers.documentQueue(tab), [tab]);
   const q = search.trim().toLowerCase();
   const data = q
@@ -125,7 +126,7 @@ export default function CompliancePage() {
             Verifying here makes them bookable wherever the rules are met, and they are notified.
           </p>
         )}
-        <ReviewRequests onAnswered={reload} />
+        <ReviewRequests refreshKey={reviewed} onAnswered={reload} />
         <div className="flex flex-wrap items-center gap-3">
           <div className="flex gap-1 p-1 bg-slate-100 rounded-lg w-fit text-sm font-semibold">
           {TABS.map((t) => (
@@ -174,7 +175,7 @@ export default function CompliancePage() {
         </Card>
         {tab === 'REJECTED' && <Badge tone="slate">Rejected documents can be re-reviewed if the worker re-uploads.</Badge>}
       </main>
-      <ReviewModal doc={reviewing} onClose={() => setReviewing(null)} onDone={reload} />
+      <ReviewModal doc={reviewing} onClose={() => setReviewing(null)} onDone={() => { reload(); setReviewed((n) => n + 1); }} />
     </>
   );
 }

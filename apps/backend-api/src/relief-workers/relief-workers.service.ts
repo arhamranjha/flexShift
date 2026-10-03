@@ -96,17 +96,26 @@ export class ReliefWorkersService {
       include: {
         user: { select: { id: true, email: true, isActive: true, createdAt: true } },
         documents: {
-          include: { verifiedBy: { select: { id: true, email: true } } },
+          include: { verifiedBy: { select: { id: true, email: true, organizationId: true } } },
           orderBy: { createdAt: 'desc' },
         },
         assignedShifts: { where: inOrg, include: { branch: true }, orderBy: { startTime: 'desc' }, take: 20 },
         timesheets: { where: inOrg, include: { branch: true }, orderBy: { submittedAt: 'desc' }, take: 20 },
         staffBankMemberships: { where: orgId ? { organizationId: orgId } : {}, include: { organization: true, branch: true } },
-        favouriteBranches: { include: { branch: true } },
+        favouriteBranches: { where: orgId ? { branch: { organizationId: orgId } } : {}, include: { branch: true } },
       },
     });
     if (!worker) throw new NotFoundException('Relief worker profile not found');
-    return worker;
+    if (!orgId) return worker;
+    // Workers can bring themselves into an organization's scope (document sharing), so staff only learn who verified a
+    // document when it was someone from their own organization.
+    return {
+      ...worker,
+      documents: worker.documents.map((d) => ({
+        ...d,
+        verifiedBy: d.verifiedBy && d.verifiedBy.organizationId === orgId ? d.verifiedBy : null,
+      })),
+    };
   }
 
   async createConciergeWorker(user: AuthUser, data: ConciergeWorkerDto) {

@@ -18,7 +18,7 @@ Backend (NestJS + Prisma + Postgres), dashboard (`apps/web-admin`), worker porta
 client/UI packages. Complete shift lifecycle: post shift → staff-bank tier cascade / marketplace → apply, negotiate rate or instant book →
 credential-gated booking → clock in/out → timesheet → approval → invoice → payment, plus leave with vacancy backfill, compliance desk with
 document uploads and expiry alerts, notifications (in-app, optional email), accounting and payment CSV exports, markets (NZ default, GB),
-super-admin Organizations screen. **93 backend tests pass**, ESLint is clean, and a real-Chrome walkthrough (34 steps) passes locally.
+super-admin Organizations screen, and two verification paths for self-registered workers (platform operator, or a request to an organization). **98 backend tests pass**, ESLint is clean, and a real-Chrome walkthrough (39 steps) passes locally.
 
 ## Where it is running (the owner's test deployment)
 | Thing | Value |
@@ -72,8 +72,8 @@ Git Bash does not ship: run it from WSL or install rsync first. The first SSH fr
 
 ## What is pending (ranked)
 Full list in `TODO.md`. The ones that need an owner decision or real-world input first:
-1. **Second verification path** (DECISIONS 2.6): a worker-initiated "share my documents with this organization" request. The operator path (super admin Compliance Desk) is built and live-ready; organizations still only see workers they invited.
-2. **Confirm NZ rules with a real pharmacy customer** and edit `common/markets.ts`: Pharmacy Council wording, police-vetting requirement, dispensing systems (only "Toniq" and "Corum" are placeholders), accreditations, GST treatment.
+1. **Confirm NZ rules with a real pharmacy customer** and edit `common/markets.ts`. The questions to ask are in [`docs/NZ_PHARMACY_QUESTIONS.md`](NZ_PHARMACY_QUESTIONS.md) (registration per profession, whether every NZ role needs a practising certificate, police vetting, systems, accreditations, GST, payment files).
+2. **Deploy the verification paths**: operator verification and worker-initiated document sharing (DECISIONS 2.6) are built; the sharing release adds migration `20261003090000_document_shares` (back up first).
 3. **NZ privacy review** before real worker documents are stored (Privacy Act 2020; offshore hosting duties under IPP 12).
 4. **Go-live hosting**: AWS/NZ region, real domain, off-server backups, uptime monitor, SMTP provider, Terraform/secrets management.
 5. Payment file: a real NZ bank-file format needs worker bank details (sensitive PII; not stored). Today: CSV payment batch + accounting CSV.

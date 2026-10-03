@@ -1,9 +1,9 @@
 'use client';
 
-import { Badge, Button, Card, Field, Modal, Select, th, td, useAction, useAsync } from '@flexshift/ui';
+import { Badge, Button, Card, ErrorBlock, Field, Modal, Select, th, td, useAction, useAsync } from '@flexshift/ui';
 import type { DocumentShare, StaffBankTier } from '@flexshift/api-client';
 import { Inbox } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { fmtLong } from '@/components/DocHelpers';
 import { TIERS } from '@/components/AddToStaffBankModal';
 import { api, useAuth, useScope } from '@/lib/auth';
@@ -11,15 +11,19 @@ import { api, useAuth, useScope } from '@/lib/auth';
 /**
  * Workers who asked this organization to review their documents (the worker-initiated verification path).
  * While a request waits, the worker's documents appear in the queue below; accepting adds them to the staff bank.
+ * `refreshKey` changes when the queue below changes, so the verified/waiting counts stay current.
  */
-export function ReviewRequests({ onAnswered }: { onAnswered: () => void }) {
+export function ReviewRequests({ refreshKey, onAnswered }: { refreshKey: number; onAnswered: () => void }) {
   const { user } = useAuth();
-  const { data, error, reload } = useAsync(() => api.documentShares.list({ status: 'PENDING' }), []);
+  const { data, error, loading, reload } = useAsync(() => api.documentShares.list({ status: 'PENDING' }), [refreshKey]);
   const [accepting, setAccepting] = useState<DocumentShare | null>(null);
-  const { run, busy } = useAction();
+  const [declining, setDeclining] = useState<DocumentShare | null>(null);
+  // Declining blocks the worker from asking again for 30 days, so only organization admins may do it (the server enforces this too).
+  const canDecline = user?.role === 'ORG_ADMIN' || user?.role === 'SUPER_ADMIN';
   const done = () => { reload(); onAnswered(); };
 
-  if (error) return <p className="text-sm text-rose-600">Could not load review requests.</p>;
+  if (error) return <Card className="p-4"><ErrorBlock error={error} retry={reload} /></Card>;
+  if (loading && !data) return <p className="text-xs text-slate-500">Loading review requests…</p>;
   if (!data?.length) return null;
 
   return (
@@ -56,10 +60,7 @@ export function ReviewRequests({ onAnswered }: { onAnswered: () => void }) {
                   </td>
                   <td className={td}>{fmtLong(s.createdAt)}</td>
                   <td className={`${td} whitespace-nowrap text-right`}>
-                    <Button size="sm" variant="secondary" disabled={busy}
-                      onClick={async () => { if (await run(() => api.documentShares.decline(s.id), 'Request declined')) done(); }}>
-                      Decline
-                    </Button>
+                    {canDecline && <Button size="sm" variant="secondary" onClick={() => setDeclining(s)}>Decline</Button>}
                     <Button size="sm" className="ml-2" onClick={() => setAccepting(s)}>Add to staff bank</Button>
                   </td>
                 </tr>
@@ -69,7 +70,24 @@ export function ReviewRequests({ onAnswered }: { onAnswered: () => void }) {
         </table>
       </div>
       <AcceptModal share={accepting} onClose={() => setAccepting(null)} onDone={done} />
+      <DeclineModal share={declining} onClose={() => setDeclining(null)} onDone={done} />
     </Card>
+  );
+}
+
+function DeclineModal({ share, onClose, onDone }: { share: DocumentShare | null; onClose: () => void; onDone: () => void }) {
+  const { run, busy } = useAction();
+  const w = share?.reliefWorker;
+  async function decline() {
+    if (share && await run(() => api.documentShares.decline(share.id), 'Request declined')) { onClose(); onDone(); }
+  }
+  return (
+    <Modal open={!!share} onClose={onClose} title="Decline request"
+      footer={<><Button variant="secondary" onClick={onClose}>Cancel</Button><Button variant="danger" loading={busy} onClick={decline}>Decline</Button></>}>
+      <p className="text-sm">
+        Decline <b>{w?.firstName} {w?.lastName}</b>? You will no longer see their profile or documents, and they cannot ask you again for 30 days.
+      </p>
+    </Modal>
   );
 }
 
@@ -80,14 +98,16 @@ function AcceptModal({ share, onClose, onDone }: { share: DocumentShare | null; 
   const isManager = user?.role === 'FACILITY_MANAGER';
   const [tier, setTier] = useState<StaffBankTier>('TIER_2_REGULAR');
   const [branchId, setBranchId] = useState('');
+  // Each request starts from the defaults, even after a cancelled one.
+  useEffect(() => { setTier('TIER_2_REGULAR'); setBranchId(''); }, [share?.id]);
   const w = share?.reliefWorker;
 
   async function accept() {
     if (!share) return;
     // Managers always add to their own branch (the server enforces it); super admins add organization-wide.
-    const body = { tier, ...(!isManager && user?.role !== 'SUPER_ADMIN' && branchId ? { branchId } : {}) };
+    const body = { tier, ...(user?.role === 'ORG_ADMIN' && branchId ? { branchId } : {}) };
     if (await run(() => api.documentShares.accept(share.id, body), `${w?.firstName} ${w?.lastName} added to the staff bank`)) {
-      setTier('TIER_2_REGULAR'); setBranchId(''); onClose(); onDone();
+      onClose(); onDone();
     }
   }
 

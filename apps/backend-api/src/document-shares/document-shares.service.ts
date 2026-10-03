@@ -7,6 +7,10 @@ import { AcceptDocumentShareDto, CreateDocumentShareDto, DocumentShareQueryDto }
 
 /** A worker may have this many requests waiting at once, so nobody can spray every organization on the platform. */
 export const MAX_PENDING_SHARES = 5;
+/** After withdrawing, a worker waits this long before asking the same organization again (each request notifies its admins). */
+export const REASK_AFTER_WITHDRAW_MS = 24 * 3_600_000;
+/** A decline stands this long; after that the worker may ask again (a misclick or a changed situation should not be forever). */
+export const REASK_AFTER_DECLINE_MS = 30 * 86_400_000;
 
 const ORG_SUMMARY = { select: { id: true, name: true } } as const;
 const WORKER_SUMMARY = {
@@ -59,14 +63,20 @@ export class DocumentSharesService {
     ]);
     if (member) throw new ConflictException(`You are already in ${org.name}'s staff bank`);
     if (existing?.status === DocumentShareStatus.PENDING) throw new ConflictException(`You have already asked ${org.name}`);
-    if (existing?.status === DocumentShareStatus.DECLINED) throw new ConflictException(`${org.name} declined your request`);
+    const since = (d?: Date | null) => Date.now() - (d?.getTime() ?? 0);
+    if (existing?.status === DocumentShareStatus.DECLINED && since(existing.respondedAt) < REASK_AFTER_DECLINE_MS) {
+      throw new ConflictException(`${org.name} declined your request; you can ask again 30 days after the decline`);
+    }
+    if (existing?.status === DocumentShareStatus.WITHDRAWN && since(existing.updatedAt) < REASK_AFTER_WITHDRAW_MS) {
+      throw new ConflictException('You withdrew this request recently; you can ask again 24 hours after withdrawing');
+    }
     if (pending >= MAX_PENDING_SHARES) {
       throw new BadRequestException(`You can have at most ${MAX_PENDING_SHARES} requests waiting; withdraw one first`);
     }
 
     let share;
     if (existing) {
-      // WITHDRAWN, or ACCEPTED but since removed from the staff bank: the worker may ask again.
+      // WITHDRAWN or DECLINED long enough ago, or ACCEPTED but since removed from the staff bank: the worker may ask again.
       const reopened = await this.prisma.documentShare.updateMany({
         where: { id: existing.id, status: existing.status },
         data: { status: DocumentShareStatus.PENDING, respondedAt: null, respondedById: null },
@@ -120,8 +130,8 @@ export class DocumentSharesService {
 
   /** Shares outside the caller's organization answer 404, like other tenant lookups. */
   private async loadForStaff(user: AuthUser, id: string) {
-    const share = await this.prisma.documentShare.findUnique({ where: { id }, include: { organization: ORG_SUMMARY } });
-    if (!share || (user.role !== Role.SUPER_ADMIN && share.organizationId !== user.organizationId)) {
+    const share = await this.prisma.documentShare.findUnique({ where: { id }, include: { organization: { select: { id: true, name: true, isActive: true } } } });
+    if (!share || !share.organization.isActive || (user.role !== Role.SUPER_ADMIN && share.organizationId !== user.organizationId)) {
       throw new NotFoundException('Request not found');
     }
     return share;

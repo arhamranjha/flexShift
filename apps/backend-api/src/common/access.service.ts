@@ -78,7 +78,7 @@ export class AccessService {
         { negotiations: { some: onOrgShift } },
         { assignedShifts: { some: { branch: { organizationId: orgId } } } },
         // Only while pending: acceptance adds the worker to the staff bank, which keeps them in scope from then on.
-        { documentShares: { some: { organizationId: orgId, status: DocumentShareStatus.PENDING } } },
+        { documentShares: { some: { organizationId: orgId, status: DocumentShareStatus.PENDING, organization: { isActive: true } } } },
       ],
     };
   }
