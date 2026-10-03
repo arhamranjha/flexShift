@@ -9,7 +9,7 @@ mkdir -p "$DEST"
 
 $COMPOSE exec -T postgres pg_dump -U flexshift -d flexshift --no-owner | gzip > "$DEST/db-$STAMP.sql.gz"
 # Documents volume (skip quietly when S3 storage is used and the volume is empty)
-docker run --rm -v flexshift_uploads:/data:ro -v "$DEST":/backup alpine tar czf "/backup/uploads-$STAMP.tar.gz" -C /data . 2>/dev/null || true
+docker run --rm -v flexshift-prod_uploads:/data:ro -v "$DEST":/backup alpine tar czf "/backup/uploads-$STAMP.tar.gz" -C /data . 2>/dev/null || true
 
 # Keep two weeks locally
 find "$DEST" -type f -mtime +14 -delete
