@@ -934,4 +934,9 @@ describe('automation: cascade, expiry, notifications, checklists, benchmarks', (
     const replaced = await api().get('/auth/me').set('Authorization', `Bearer ${sarahT}`).set('X-Request-Id', 'bad id with spaces\t').expect(200);
     expect(replaced.headers['x-request-id']).toMatch(/^[0-9a-f-]{36}$/);
   });
+
+  it('answers the unauthenticated health probe with a database check', async () => {
+    const res = await api().get('/health').expect(200);
+    expect(res.body).toEqual({ status: 'ok' });
+  });
 });

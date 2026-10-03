@@ -22,6 +22,7 @@ import { LeaveModule } from './leave/leave.module';
 import { AnalyticsModule } from './analytics/analytics.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { JobsModule } from './jobs/jobs.module';
+import { HealthModule } from './health/health.module';
 
 @Module({
   imports: [
@@ -33,6 +34,7 @@ import { JobsModule } from './jobs/jobs.module';
     NotificationsModule,
     ScheduleModule.forRoot(),
     JobsModule,
+    HealthModule,
     AuthModule,
     UsersModule,
     OrganizationsModule,
