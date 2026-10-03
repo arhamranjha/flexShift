@@ -9,7 +9,7 @@ import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { ExpiryCell, MandatoryChecklist, expiryState, fmtLong } from '@/components/DocHelpers';
 import { Header } from '@/components/Header';
-import { api } from '@/lib/auth';
+import { api, useAuth } from '@/lib/auth';
 import { useMarket } from '@/lib/market';
 
 const TABS: { key: DocStatus; label: string }[] = [
@@ -106,16 +106,38 @@ export default function CompliancePage() {
   const [tab, setTab] = useState<DocStatus>('PENDING');
   const [reviewing, setReviewing] = useState<ComplianceDocument | null>(null);
   const { docLabel } = useMarket();
-  const { data, error, loading, reload } = useAsync(() => api.workers.documentQueue(tab), [tab]);
+  const { user } = useAuth();
+  const [search, setSearch] = useState('');
+  const { data: all, error, loading, reload } = useAsync(() => api.workers.documentQueue(tab), [tab]);
+  const q = search.trim().toLowerCase();
+  const data = q
+    ? all?.filter((d) => `${d.reliefWorker?.firstName} ${d.reliefWorker?.lastName} ${d.reliefWorker?.registrationNumber} ${d.reliefWorker?.user?.email ?? ''}`.toLowerCase().includes(q))
+    : all;
 
   return (
     <>
       <Header title="Compliance" subtitle="Review credentials before workers become bookable" hideBranchPicker />
       <main className="p-8 space-y-6">
-        <div className="flex gap-1 p-1 bg-slate-100 rounded-lg w-fit text-sm font-semibold">
+        {user?.role === 'SUPER_ADMIN' && (
+          <p className="text-sm text-slate-600 bg-sky-50 border border-sky-100 rounded-lg px-4 py-3">
+            Platform queue: you see documents from <b>every</b> worker, including people who registered themselves and have not been invited by any organization.
+            Verifying here makes them bookable wherever the rules are met, and they are notified.
+          </p>
+        )}
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="flex gap-1 p-1 bg-slate-100 rounded-lg w-fit text-sm font-semibold">
           {TABS.map((t) => (
             <button key={t.key} onClick={() => setTab(t.key)} className={`px-4 py-1.5 rounded-md ${tab === t.key ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500'}`}>{t.label}</button>
           ))}
+          </div>
+          <input
+            type="search"
+            aria-label="Search workers"
+            placeholder="Search name, registration number or email"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm w-72 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
+          />
         </div>
         <Card>
           {loading ? <LoadingBlock /> : error ? <ErrorBlock error={error} retry={reload} /> : !data?.length ? (
@@ -132,7 +154,8 @@ export default function CompliancePage() {
                     <tr key={d.id}>
                       <td className={td}>
                         <p className="font-semibold text-slate-900">{d.reliefWorker ? `${d.reliefWorker.firstName} ${d.reliefWorker.lastName}` : '-'}</p>
-                        <p className="text-xs text-slate-500">{d.reliefWorker?.profession}</p>
+                        <p className="text-xs text-slate-500">{d.reliefWorker?.profession}{d.reliefWorker?.country ? ` · ${d.reliefWorker.country}` : ''}</p>
+                        {d.reliefWorker?.user?.email && <p className="text-xs text-slate-400">{d.reliefWorker.user.email}</p>}
                       </td>
                       <td className={td}>{docLabel(d.type)}</td>
                       <td className={td}>{d.documentReference || '-'}</td>

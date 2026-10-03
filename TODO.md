@@ -21,7 +21,8 @@ Legend: [x] done · [~] partly done · [ ] not started
 - [x] Accounting export (purchase-invoice CSV in the common bills-import layout; account code / tax type / date range options)
 - [x] HTTP-only cookie sessions (per-app cookie, SameSite, CSRF header, bearer still accepted for tools/tests); no token in browser storage
 - [x] Leave conflict detection (same person cannot hold overlapping pending/approved leave at a branch)
-- [ ] **Decision needed:** how self-registered workers get verified. Today they are invisible to every organization until a manager adds them to the staff bank by registration number (DECISIONS 2.6). Options: a platform-wide verification queue run by the operator, or a worker-initiated "share my documents with this organization" request
+- [x] Operator (platform) verification of self-registered workers: platform queue in the Compliance Desk for super admins, notification on upload, worker told who reviews (DECISIONS 2.6)
+- [ ] Worker-initiated "share my documents with this organization" request (the second verification path; organizations still only see invited workers)
 - [ ] Per-organization document *verification* (today any in-scope organization can verify a worker's documents; verified status is global)
 - [ ] `isVerified` only reflects the four base documents; NZ workers without a practising certificate still show as verified (bookability is enforced separately)
 - [ ] HEIC photos (iPhone default) are not accepted for document upload

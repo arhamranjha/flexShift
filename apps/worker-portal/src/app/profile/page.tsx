@@ -40,7 +40,7 @@ export default function ProfilePage() {
       {(welcome || docs.length === 0) && (
         <div className="rounded-xl bg-emerald-50 border border-emerald-200 p-4 text-sm text-emerald-900">
           <p className="font-bold">Upload your compliance documents to start booking</p>
-          <p className="mt-0.5">Shifts need these verified documents: {MANDATORY.map((t) => docLabel(t).toLowerCase()).join(', ')}. A manager reviews each upload.</p>
+          <p className="mt-0.5">Shifts need these verified documents: {MANDATORY.map((t) => docLabel(t).toLowerCase()).join(', ')}. The FlexShift team, or an organization that has invited you, reviews each upload and you are notified when it is verified.</p>
         </div>
       )}
 

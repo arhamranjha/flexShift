@@ -159,7 +159,7 @@ export class ReliefWorkersService {
 
     assertFileSignature(file);
     const { key } = await this.storage.save(file);
-    return this.prisma.complianceDocument.create({
+    const doc = await this.prisma.complianceDocument.create({
       data: {
         reliefWorkerId: workerId,
         type: dto.type,
@@ -170,6 +170,18 @@ export class ReliefWorkersService {
         status: DocStatus.PENDING,
       },
     });
+
+    // A worker uploading for themselves may belong to no organization yet, so the platform operator is told there is something to review.
+    if (user.role === Role.RELIEF_WORKER) {
+      const w = await this.prisma.reliefProfile.findUnique({ where: { id: workerId }, select: { firstName: true, lastName: true } });
+      await this.notifications.notifyPlatformAdmins({
+        type: 'DOCUMENT_UPLOADED',
+        title: 'A worker uploaded a document for review',
+        body: `${w?.firstName} ${w?.lastName}: ${dto.type}`,
+        link: '/compliance',
+      });
+    }
+    return doc;
   }
 
   async downloadDocument(user: AuthUser, docId: string) {
@@ -183,7 +195,7 @@ export class ReliefWorkersService {
     return this.prisma.complianceDocument.findMany({
       where: { status: q.status ?? DocStatus.PENDING, reliefWorker: this.access.workerScope(user) },
       include: {
-        reliefWorker: { select: { id: true, firstName: true, lastName: true, profession: true, registrationNumber: true } },
+        reliefWorker: { select: { id: true, firstName: true, lastName: true, profession: true, registrationNumber: true, country: true, user: { select: { email: true } } } },
       },
       orderBy: { createdAt: 'asc' },
       take: 200,

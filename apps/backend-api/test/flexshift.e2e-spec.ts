@@ -1160,6 +1160,47 @@ describe('automation: cascade, expiry, notifications, checklists, benchmarks', (
       expect(await gotIt(davidT, ukEmergency.id)).toBe(true);
       expect(await gotIt(sarahT, ukEmergency.id)).toBe(true);
     });
+
+    it('operator verification: a self-registered worker, invisible to organizations, is verified by the platform and can then book', async () => {
+      const reg = (await api().post('/auth/register/relief-worker').send({
+        email: `selfreg-${Date.now()}@worker.test`, password: 'WorkerPass123!', firstName: 'Self', lastName: 'Registered', phone: '+64 21 555 0100', registrationNumber: `SELF-${Date.now() % 1e7}`,
+      }).expect(201)).body;
+      const wT = reg.accessToken as string;
+      const wId = reg.user.reliefProfile.id as string;
+      const pdf = Buffer.from('%PDF-1.4 self-registered');
+      const types = ['IDENTITY', 'RIGHT_TO_WORK', 'DBS_POLICE_CHECK', 'INDEMNITY_INSURANCE', 'PRACTISING_CERTIFICATE'];
+      const docIds: string[] = [];
+      for (const type of types) {
+        const up = await api().post(`/relief-workers/${wId}/documents`).set('Authorization', `Bearer ${wT}`).field('type', type)
+          .field('expiresAt', at(400, 0)).attach('file', pdf, { filename: `${type}.pdf` }).expect(201);
+        docIds.push(up.body.id);
+      }
+
+      // the platform operator is told; an organization that has not invited the worker is not, and cannot see the documents
+      const mine = (t: string) => get(t, '/notifications').expect(200).then((r) => r.body.items.filter((n: any) => n.type === 'DOCUMENT_UPLOADED' && n.body.includes('Self Registered')));
+      expect((await mine(superT)).length).toBe(5);
+      expect((await mine(nzMgrT)).length).toBe(0);
+      expect((await mine(adminT)).length).toBe(0);
+      const orgQueue = (await get(nzMgrT, '/relief-workers/documents/queue').expect(200)).body;
+      expect(orgQueue.some((d: any) => docIds.includes(d.id))).toBe(false);
+
+      // the operator sees everything with a way to contact the worker
+      const opQueue = (await get(superT, '/relief-workers/documents/queue').expect(200)).body;
+      const mineDocs = opQueue.filter((d: any) => docIds.includes(d.id));
+      expect(mineDocs).toHaveLength(5);
+      expect(mineDocs[0].reliefWorker.user.email).toMatch(/selfreg-/);
+      expect(mineDocs[0].reliefWorker.country).toBe('NZ');
+
+      // not bookable yet
+      const shift = (await post(nzMgrT, '/shifts', { branchId: nzBranchId, title: 'Operator verification shift', startTime: at(100, 9), endTime: at(100, 17), hourlyRate: 45, visibility: 'PUBLIC_MARKETPLACE', instantBookEnabled: true }).expect(201)).body;
+      await post(wT, `/shifts/${shift.id}/instant-book`).expect(403);
+
+      // the operator verifies; the worker is told, becomes verified and can book the NZ shift
+      for (const id of docIds) await patch(superT, `/relief-workers/documents/${id}/verify`, { status: 'VERIFIED' }).expect(200);
+      expect((await prisma.reliefProfile.findUnique({ where: { id: wId } })).isVerified).toBe(true);
+      expect((await get(wT, '/notifications').expect(200)).body.items.filter((n: any) => n.type === 'DOCUMENT_VERIFIED')).toHaveLength(5);
+      expect((await post(wT, `/shifts/${shift.id}/instant-book`).expect(201)).body.status).toBe('BOOKED');
+    });
   });
 
   it('lets a super admin onboard a customer through the API, and nobody else', async () => {
