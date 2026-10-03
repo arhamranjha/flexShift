@@ -5,7 +5,7 @@
 FlexShift is a clean-room, two-sided workforce management SaaS and flexible shift fulfillment platform designed for healthcare organizations (community pharmacies, optical clinics, care practices) and qualified relief professionals.
 
 > **Project docs:** [`docs/HANDOFF.md`](docs/HANDOFF.md) (start here: state, operations, pending work) ·
-> [`docs/DECISIONS.md`](docs/DECISIONS.md) (why it is built this way) · [`TODO.md`](TODO.md) · [`deploy/DEPLOY.md`](deploy/DEPLOY.md) · [`CLAUDE.md`](CLAUDE.md) (working in the code)
+> [`docs/DECISIONS.md`](docs/DECISIONS.md) (why it is built this way) · [`docs/NEW_AGENT_PROMPT.md`](docs/NEW_AGENT_PROMPT.md) (paste into a new Claude session) · [`TODO.md`](TODO.md) · [`deploy/DEPLOY.md`](deploy/DEPLOY.md) · [`CLAUDE.md`](CLAUDE.md) (working in the code)
 
 ---
 

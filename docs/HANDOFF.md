@@ -6,6 +6,8 @@ Written for the next engineer or agent picking this project up. Read this, then 
 
 _State as of 2026-10-03, branch `feature/platform-buildout` merged to `main`._
 
+> A ready-to-paste first message for a new agent or Claude account is in [`docs/NEW_AGENT_PROMPT.md`](NEW_AGENT_PROMPT.md).
+
 ## What this is
 FlexShift is a two-sided healthcare workforce platform for **New Zealand** (UK also supported). Pharmacies and similar organizations post
 shifts and manage a staff bank, compliance, timesheets and invoicing; relief professionals find, book and get paid for shifts and keep 100% of
