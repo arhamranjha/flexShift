@@ -61,8 +61,12 @@ An organization only sees workers it onboarded, has in its staff bank, or who ap
 *Why:* worker documents (identity, right to work, police checks) are sensitive; the first review found every manager could read all of them.
 *Consequence you must know:* a **self-registered worker is invisible to every organization until a manager looks them up by
 registration number and adds them to the staff bank** (`GET /relief-workers/lookup`). Only then can that organization review their
-documents. A worker cannot apply to shifts until verified, so there is no other path. A platform-wide verification queue run by the
-operator (super admin sees all pending documents already) is an **open product decision** (HANDOFF.md).
+documents. A worker cannot apply to shifts until verified, so there is no other path. **Decision (2026-10-03, owner): build both paths, operator first.**
+(1) *Operator verification — built.* The platform operator (super admin) sees every worker's pending documents in the Compliance Desk (a
+"platform queue" banner, worker email/country, search) and is notified in-app (`DOCUMENT_UPLOADED`) when a worker uploads. Verifying makes the
+worker bookable wherever the rules are met and notifies them. Organizations still see only workers in their scope, so one organization cannot
+verify strangers. (2) *Worker-initiated "share my documents with this organization" request — not built yet*; it scales without the operator
+and is the next step once there are customers (TODO.md). Cost of (1): the operator is a bottleneck by design.
 
 ### 2.7 Sessions: HttpOnly cookies, one per app, CSRF header; bearer still accepted
 Browser apps hold no token in JavaScript-readable storage. Login/register/change-password set `fs_admin` or `fs_worker` (HttpOnly,

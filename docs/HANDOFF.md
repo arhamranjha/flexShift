@@ -68,7 +68,7 @@ See README "Getting Started" and `CLAUDE.md` Commands. In short: `pnpm install`,
 
 ## What is pending (ranked)
 Full list in `TODO.md`. The ones that need an owner decision or real-world input first:
-1. **Self-registered worker verification path** (DECISIONS 2.6). Today a new worker is invisible to organizations until invited; decide on a platform verification queue or a share-with-organization request.
+1. **Second verification path** (DECISIONS 2.6): a worker-initiated "share my documents with this organization" request. The operator path (super admin Compliance Desk) is built and live-ready; organizations still only see workers they invited.
 2. **Confirm NZ rules with a real pharmacy customer** and edit `common/markets.ts`: Pharmacy Council wording, police-vetting requirement, dispensing systems (only "Toniq" and "Corum" are placeholders), accreditations, GST treatment.
 3. **NZ privacy review** before real worker documents are stored (Privacy Act 2020; offshore hosting duties under IPP 12).
 4. **Go-live hosting**: AWS/NZ region, real domain, off-server backups, uptime monitor, SMTP provider, Terraform/secrets management.

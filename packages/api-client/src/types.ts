@@ -153,7 +153,7 @@ export interface ComplianceDocument {
   status: DocStatus;
   verificationNotes?: string | null;
   createdAt: string;
-  reliefWorker?: Pick<ReliefProfile, 'id' | 'firstName' | 'lastName' | 'profession' | 'registrationNumber'>;
+  reliefWorker?: Pick<ReliefProfile, 'id' | 'firstName' | 'lastName' | 'profession' | 'registrationNumber'> & { country?: string; user?: { email: string } };
 }
 
 export interface StaffBankMember {

@@ -79,6 +79,12 @@ export class NotificationsService {
     }
   }
 
+  /** Platform operators (super admins): they review documents for workers no organization has invited yet. */
+  async notifyPlatformAdmins(n: NotificationInput) {
+    const admins = await this.prisma.user.findMany({ where: { role: Role.SUPER_ADMIN, isActive: true }, select: { id: true } });
+    await this.notifyUsers(admins.map((a) => a.id), n);
+  }
+
   async notifyWorker(workerId: string, n: NotificationInput) {
     const w = await this.prisma.reliefProfile.findUnique({ where: { id: workerId }, select: { userId: true } });
     if (w) await this.notifyUsers([w.userId], n);
