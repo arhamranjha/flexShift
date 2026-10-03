@@ -18,7 +18,7 @@ Legend: [x] done · [~] partly done · [ ] not started
 - [x] S3 document storage (set S3_BUCKET; tested against an S3-compatible server; local disk remains the default)
 - [x] Email delivery for important notifications (SMTP via nodemailer, off by default; per-user opt-out in the bell menu; drivers off/smtp/json)
 - [ ] Real BACS file: needs worker bank details (CSV payment batch exists, no sort code/account no.)
-- [ ] Accounting-software export
+- [x] Accounting export (purchase-invoice CSV in the common bills-import layout; account code / tax type / date range options)
 - [x] HTTP-only cookie sessions (per-app cookie, SameSite, CSRF header, bearer still accepted for tools/tests); no token in browser storage
 - [x] Leave conflict detection (same person cannot hold overlapping pending/approved leave at a branch)
 - [ ] Per-organization document *verification* (today any in-scope organization can verify a worker's documents; verified status is global)

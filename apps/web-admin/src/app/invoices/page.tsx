@@ -63,28 +63,33 @@ function InvoicesView() {
     if (ok) { setPayFor(null); setRef(''); reload(); }
   }
 
-  async function exportCsv() {
-    if (!orgId) return;
+  async function download(fetchBlob: () => Promise<Blob>, name: string) {
     setExporting(true);
     try {
-      const blob = await api.invoices.exportCsv(orgId, 'ISSUED' as InvoiceStatus);
-      const url = URL.createObjectURL(blob);
+      const url = URL.createObjectURL(await fetchBlob());
       const a = document.createElement('a');
       a.href = url;
-      a.download = `payment-batch-${new Date().toISOString().slice(0, 10)}.csv`;
+      a.download = `${name}-${new Date().toISOString().slice(0, 10)}.csv`;
       document.body.appendChild(a); a.click(); a.remove();
       URL.revokeObjectURL(url);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Export failed');
     } finally { setExporting(false); }
   }
+  const exportCsv = () => orgId && download(() => api.invoices.exportCsv(orgId, 'ISSUED' as InvoiceStatus), 'payment-batch');
+  const exportAccounting = () => orgId && download(() => api.invoices.exportAccounting(orgId), 'accounting-export');
 
   const refValid = ref.trim().length >= 3 && ref.trim().length <= 100;
 
   return (
     <>
       <Header title="Invoices" subtitle="Worker invoices generated from approved timesheets" hideBranchPicker
-        actions={<Button variant="secondary" loading={exporting} onClick={exportCsv}><Download className="w-4 h-4" />Export payment batch (CSV)</Button>} />
+        actions={(
+          <div className="flex gap-2">
+            <Button variant="secondary" loading={exporting} onClick={exportAccounting}><Download className="w-4 h-4" />Accounting export (CSV)</Button>
+            <Button variant="secondary" loading={exporting} onClick={exportCsv}><Download className="w-4 h-4" />Export payment batch (CSV)</Button>
+          </div>
+        )} />
       <main className="p-8 space-y-6">
         <div className="grid gap-4 sm:grid-cols-3">
           {[

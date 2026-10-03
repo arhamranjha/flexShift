@@ -106,6 +106,6 @@ JWT_SECRET=$(openssl rand -base64 48) docker compose --profile app up --build
 | Negotiations | `/negotiations` (+ `/mine`, `:id/accept`, `:id/counter`, `:id/reject`) |
 | Staff bank | `/staff-bank` |
 | Relief workers | `/relief-workers` (+ `/lookup`, concierge onboarding, document upload/queue/verify/file, `/me/preferences`) |
-| Timesheets / Invoices | `/timesheets`, `/invoices` (+ `/organization/:id/export.csv`) |
+| Timesheets / Invoices | `/timesheets` (+ `clock-in`, `clock-out`), `/invoices` (+ `/organization/:id/export.csv` payment batch, `/organization/:id/accounting.csv`) |
 | Leave | `/leave` (approval can create backfill vacancies) |
 | Analytics / Notifications | `/analytics/overview`, `/analytics/market-rates`, `/notifications` |

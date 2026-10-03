@@ -1,4 +1,4 @@
-import { ArgumentsHost, Catch, ExceptionFilter, HttpStatus } from '@nestjs/common';
+import { ArgumentsHost, Catch, ExceptionFilter, HttpStatus, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { Response } from 'express';
 
@@ -13,6 +13,8 @@ export class PrismaExceptionFilter implements ExceptionFilter {
       P2003: [HttpStatus.BAD_REQUEST, 'A referenced record does not exist'],
     };
     const [status, message] = map[e.code] ?? [HttpStatus.INTERNAL_SERVER_ERROR, 'Internal server error'];
+    // Mapped codes are expected client errors; anything else is a bug or an outage and must not be silent.
+    if (status >= 500) new Logger('PrismaExceptionFilter').error(`${e.code} ${e.message}`, e.stack);
     res.status(status).json({ statusCode: status, message, error: HttpStatus[status] });
   }
 }

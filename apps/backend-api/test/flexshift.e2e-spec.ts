@@ -904,4 +904,34 @@ describe('automation: cascade, expiry, notifications, checklists, benchmarks', (
     expect(([] as string[]).concat(changed.headers['set-cookie'] as any).join(';')).toMatch(/fs_worker=/);
     await agent.get('/shifts/feed').set('X-FlexShift-App', 'worker').expect(200); // new cookie works
   });
+
+  it('exports invoices for accounting software, scoped and validated', async () => {
+    const res = await get(adminT, `/invoices/organization/${apexId}/accounting.csv`).expect(200);
+    expect(res.headers['content-type']).toMatch(/text\/csv/);
+    const [header, ...rows] = res.text.trim().split('\r\n');
+    expect(header).toBe('"*ContactName","*InvoiceNumber","Reference","*InvoiceDate","*DueDate","Description","*Quantity","*UnitAmount","*AccountCode","*TaxType","Currency"');
+    expect(rows.length).toBeGreaterThan(0);
+    expect(rows[0]).toMatch(/"INV-\d{8}-[0-9A-F]{6}"/);
+    expect(res.text).toContain('Relief cover at Richmond');
+    // quantity x unit amount reproduces the invoice total
+    const cells = rows[0].split('","').map((c) => c.replace(/"/g, ''));
+    expect(Number(cells[6]) * Number(cells[7])).toBeGreaterThan(0);
+
+    const custom = (await get(adminT, `/invoices/organization/${apexId}/accounting.csv?accountCode=400&taxType=Tax%20Exempt&from=2020-01-01&to=2099-01-01`).expect(200)).text;
+    expect(custom).toContain('"400","Tax Exempt"');
+    expect((await get(adminT, `/invoices/organization/${apexId}/accounting.csv?from=2099-01-01`).expect(200)).text.trim().split('\r\n')).toHaveLength(1); // header only
+    await get(adminT, `/invoices/organization/${apexId}/accounting.csv?from=yesterday`).expect(400);
+    await get(adminT, `/invoices/organization/${apexId}/accounting.csv?accountCode=1;DROP`).expect(400);
+    await get(richmondT, `/invoices/organization/${apexId}/accounting.csv`).expect(403);
+    await get(adminT, `/invoices/organization/${crestId}/accounting.csv`).expect(403);
+  });
+
+  it('tags every response with a request id and keeps a sane incoming one', async () => {
+    const generated = await get(sarahT, '/auth/me').expect(200);
+    expect(generated.headers['x-request-id']).toMatch(/^[0-9a-f-]{36}$/);
+    const kept = await api().get('/auth/me').set('Authorization', `Bearer ${sarahT}`).set('X-Request-Id', 'trace-abc-12345').expect(200);
+    expect(kept.headers['x-request-id']).toBe('trace-abc-12345');
+    const replaced = await api().get('/auth/me').set('Authorization', `Bearer ${sarahT}`).set('X-Request-Id', 'bad id with spaces\t').expect(200);
+    expect(replaced.headers['x-request-id']).toMatch(/^[0-9a-f-]{36}$/);
+  });
 });

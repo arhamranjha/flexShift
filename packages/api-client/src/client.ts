@@ -158,6 +158,9 @@ export function createApiClient(opts: ClientOptions) {
       mine: () => get<T.FinanceSummary>('/invoices/my-finance'),
       pay: (id: string, paymentReference: string) => send<T.Invoice>('PATCH', `/invoices/${id}/pay`, { paymentReference }),
       exportCsv: async (orgId: string, status?: T.InvoiceStatus) => (await raw(`/invoices/organization/${orgId}/export.csv${qs({ status })}`)).blob(),
+      /** Purchase-invoice CSV for accounting software (one line per invoice). */
+      exportAccounting: async (orgId: string, q?: { status?: T.InvoiceStatus; from?: string; to?: string; accountCode?: string; taxType?: string }) =>
+        (await raw(`/invoices/organization/${orgId}/accounting.csv${qs(q)}`)).blob(),
     },
     leave: {
       byBranch: (branchId: string) => get<T.LeaveRequest[]>(`/leave/branch/${branchId}`),

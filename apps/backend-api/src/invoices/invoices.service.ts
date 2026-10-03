@@ -87,4 +87,40 @@ export class InvoicesService {
     ]);
     return [header, ...rows].map((r) => r.map(csvCell).join(',')).join('\r\n') + '\r\n';
   }
+
+  /**
+   * Purchase-invoice import file for accounting software (column names follow the common
+   * "bills" import layout used by Xero-style tools). One line per invoice: hours x agreed rate.
+   */
+  async exportAccounting(
+    user: AuthUser,
+    organizationId: string,
+    opts: { status?: InvoiceStatus; from?: string; to?: string; accountCode?: string; taxType?: string },
+  ) {
+    const invoices = (await this.findByOrganization(user, organizationId, opts.status)).filter((i) => {
+      const t = i.issuedAt.getTime();
+      return (!opts.from || t >= new Date(opts.from).getTime()) && (!opts.to || t <= new Date(opts.to).getTime() + 86_399_999);
+    });
+    const header = ['*ContactName', '*InvoiceNumber', 'Reference', '*InvoiceDate', '*DueDate', 'Description', '*Quantity', '*UnitAmount', '*AccountCode', '*TaxType', 'Currency'];
+    const rows = invoices.map((i) => {
+      const ts = i.timesheet;
+      const hours = ts ? Number(ts.billableHours) : 1;
+      const rate = ts ? Number(ts.hourlyRateApplied) : Number(i.totalAmount);
+      const day = (d?: Date | null) => (d ? d.toISOString().slice(0, 10) : '');
+      return [
+        `${i.reliefWorker.firstName} ${i.reliefWorker.lastName}`,
+        i.invoiceNumber,
+        i.paymentReference ?? '',
+        day(i.issuedAt),
+        day(i.dueAt),
+        `Relief cover${ts?.branch?.name ? ` at ${ts.branch.name}` : ''}`,
+        hours.toFixed(2),
+        rate.toFixed(2),
+        opts.accountCode ?? '310',
+        opts.taxType ?? 'No VAT',
+        i.currency,
+      ];
+    });
+    return [header, ...rows].map((r) => r.map(csvCell).join(',')).join('\r\n') + '\r\n';
+  }
 }

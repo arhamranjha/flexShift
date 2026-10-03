@@ -1,4 +1,4 @@
-import { IsEnum, IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
+import { IsDateString, IsEnum, IsOptional, IsString, Matches, MaxLength, MinLength } from 'class-validator';
 import { InvoiceStatus } from '@prisma/client';
 
 export class MarkPaidDto {
@@ -7,4 +7,11 @@ export class MarkPaidDto {
 
 export class InvoiceQueryDto {
   @IsOptional() @IsEnum(InvoiceStatus) status?: InvoiceStatus;
+}
+
+export class AccountingQueryDto extends InvoiceQueryDto {
+  @IsOptional() @IsDateString() from?: string;
+  @IsOptional() @IsDateString() to?: string;
+  @IsOptional() @Matches(/^[A-Za-z0-9._-]{1,20}$/) accountCode?: string;
+  @IsOptional() @Matches(/^[A-Za-z0-9 ._%-]{1,40}$/) taxType?: string;
 }
