@@ -79,6 +79,9 @@ pnpm lint            # type-checks every workspace package
 The test database must exist once: `docker exec flexshift-postgres psql -U postgres -c "CREATE DATABASE flexshift_test"`.
 Do not run two test processes at the same time; they share that database.
 
+### Browser walkthrough
+With the stack running (see `apps/e2e-ui/walkthrough.mjs`), `pnpm --filter e2e-ui walkthrough` drives Chrome through the dashboard and the worker portal, including a negotiation round trip between them.
+
 ### Full stack in containers
 ```bash
 JWT_SECRET=$(openssl rand -base64 48) docker compose --profile app up --build

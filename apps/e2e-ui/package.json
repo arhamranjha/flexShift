@@ -1,0 +1,12 @@
+{
+  "name": "e2e-ui",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Browser walkthrough of the dashboard and worker portal (needs the API, both apps and Google Chrome)",
+  "scripts": {
+    "walkthrough": "node walkthrough.mjs"
+  },
+  "devDependencies": {
+    "playwright-core": "^1.49.0"
+  }
+}

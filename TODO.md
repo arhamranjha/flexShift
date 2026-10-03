@@ -33,7 +33,8 @@ Legend: [x] done · [~] partly done · [ ] not started
 - [x] Rate negotiations inbox, staff bank (tiers, rates, invite by registration number), workers directory + concierge onboarding
 - [x] Compliance desk (review queue, previews, mandatory checklist), timesheets (single + bulk approval), invoices (pay, CSV export), leave (backfill), settings (org, branches, team, extra required credentials)
 - [x] Notification bell
-- [ ] Live browser walkthrough: pages compile, type-check and are covered by the client contract test, but nobody has clicked through them (browser tooling was unavailable)
+- [x] Real-browser walkthrough (`apps/e2e-ui`, Playwright driving system Chrome): login/logout and cookie session, every dashboard and portal page, creating a shift in the form, and a full worker↔manager negotiation → booking round trip across both apps (34 steps, no console errors or 5xx)
+- [ ] Run the browser walkthrough in CI (needs Chrome and the three servers)
 - [ ] Modal-level a11y beyond focus trap (labelled landmarks, screen-reader pass)
 - [x] Clearing optional values (staff-bank custom rate)
 

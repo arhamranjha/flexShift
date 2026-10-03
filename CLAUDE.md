@@ -56,6 +56,8 @@ One Nest module per domain (auth, users, organizations, branches, relief-workers
 
 Both apps are client-rendered App Router apps with the same shape: `src/lib/auth.tsx` (session is the HttpOnly cookie, single shared `api` client, `AuthProvider`; web-admin also has `ScopeProvider`/`useScope` for the branch picker and `orgId`), `components/AppShell` (route guard, redirects, blocks rendering while a password change is pending), and one folder per page under `src/app`. Pages load with `useAsync`, mutate with `useAction` (toasts API errors), and must show loading/error/empty states. All HTTP goes through `packages/api-client`; add a method there (and its type) rather than calling `fetch` in a page. A 403 from booking carries `ApiError.details.problems: string[]` which the UIs render as a checklist.
 
+`apps/e2e-ui/walkthrough.mjs` drives real Chrome (via `playwright-core` and the system Chrome, no browser download) through both apps against a running stack and saves screenshots to `/tmp/fs-ui`. Start `pnpm seed`, the API with `AUTH_THROTTLE_LIMIT=1000 node dist/main.js` (the script logs in far more than the default 10/min), and `next start` on :3000 and :3001, then `pnpm --filter e2e-ui walkthrough`.
+
 `test/client-contract.e2e-spec.ts` runs the shared client against a real server, so renaming a DTO field or client method breaks it by design.
 
 ## Infra

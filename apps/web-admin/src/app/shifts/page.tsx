@@ -77,7 +77,7 @@ export default function ShiftsPage() {
               action={<Button size="sm" onClick={() => openForm(null)}>New shift</Button>}
             />
           ) : (
-            <table className="w-full min-w-[1100px]">
+            <table className="w-full min-w-[1000px]">
               <thead>
                 <tr>
                   {['Shift', 'Branch', 'When', 'Rate', 'Visibility', 'Status', 'Applicants', 'Worker', 'Actions'].map((h) => <th key={h} className={th}>{h}</th>)}
@@ -93,7 +93,7 @@ export default function ShiftsPage() {
                         <button onClick={() => setDetailId(s.id)} className="text-left font-semibold text-slate-900 hover:text-emerald-700 hover:underline">{s.title}</button>
                         <div className="flex gap-1 mt-0.5">{s.isEmergency && <Badge tone="rose">Emergency</Badge>}{s.isOvernight && <Badge>Overnight</Badge>}</div>
                       </td>
-                      <td className={td}>{s.branch?.name}</td>
+                      <td className={`${td} max-w-[9rem]`}>{s.branch?.name}</td>
                       <td className={`${td} whitespace-nowrap`}>{fmtRange(s.startTime, s.endTime)}</td>
                       <td className={td}>{gbp(s.hourlyRate)}/h</td>
                       <td className={td}>
@@ -116,11 +116,11 @@ export default function ShiftsPage() {
                         </button>
                       </td>
                       <td className={td}>{s.assignedWorker ? `${s.assignedWorker.firstName} ${s.assignedWorker.lastName}` : <span className="text-slate-400">-</span>}</td>
-                      <td className={td}>
+                      <td className={`${td} whitespace-nowrap`}>
                         <div className="flex flex-wrap gap-1.5">
                           {s.status === 'DRAFT' && <Button size="sm" disabled={busy} onClick={() => publish(s)}>Publish</Button>}
                           {widen && s.status !== 'DRAFT' && (
-                            <Button size="sm" variant="secondary" disabled={busy} onClick={() => setVisibility(s, 'PUBLIC_MARKETPLACE')}>Widen to marketplace</Button>
+                            <Button size="sm" variant="secondary" disabled={busy} onClick={() => setVisibility(s, 'PUBLIC_MARKETPLACE')}>Make public</Button>
                           )}
                           {editable && <Button size="sm" variant="secondary" onClick={() => openForm(s)}>Edit</Button>}
                           {['DRAFT', 'OPEN', 'IN_NEGOTIATION', 'BOOKED'].includes(s.status) && (

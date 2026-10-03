@@ -22,6 +22,7 @@ export function ShiftCard({
           <Payout shift={shift} />
         </div>
         <p className="text-sm text-slate-800 font-medium mt-2">{fmtRange(shift.startTime, shift.endTime)}</p>
+        <p className="text-sm text-slate-700 mt-0.5">{shift.title}</p>
         <p className="text-xs text-slate-500 mb-2">{shift.roleRequired}</p>
         <ShiftBadges shift={shift} />
       </Link>
