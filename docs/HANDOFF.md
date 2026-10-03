@@ -59,6 +59,10 @@ See README "Getting Started" and `CLAUDE.md` Commands. In short: `pnpm install`,
 `FlexShiftPass2026!` (README table); the seeded organizations are **UK** on purpose (shows two markets side by side), new organizations are NZ.
 `pnpm lint` (ESLint + tsc) and `pnpm test:backend` must pass before you commit. Needs Node 22.13+ and pnpm.
 
+**On Windows** (Git Bash): install pnpm with `npm i -g pnpm@<version in package.json>` and never run `npm install` (it leaves a
+`package-lock.json`). `.gitattributes` forces LF so a Windows checkout can be deployed. `deploy/push.sh` needs `rsync`, which
+Git Bash does not ship: run it from WSL or install rsync first. The first SSH from a new machine must accept the server's host key.
+
 ## How we work (keep doing this)
 1. Plan, then build phase by phase; keep `TODO.md` honest (tick only what is verified).
 2. After each phase, run an **independent reviewer agent** (read-only, adversarial) and fix what it finds before moving on.
