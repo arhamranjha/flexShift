@@ -29,6 +29,7 @@ super-admin Organizations screen, and two verification paths for self-registered
 | API health | https://api.204-168-199-75.sslip.io/health |
 | SSH | `ssh -i ~/.ssh/flexshift -o IdentitiesOnly=yes root@204.168.199.75` (the key is on the owner's Mac; never in the repo) |
 | App location on server | `/opt/flexshift`, config in `/opt/flexshift/deploy/.env` (secrets; also in the owner's gitignored `deploy/.env` locally) |
+| Deployed | `main` at the PR #4 merge (operator verification + worker document sharing), 2026-10-03, backup `20261003-184129` taken first |
 | Real data | one super admin (`arhamranjha@gmail.com`), one customer organization "Kiwi Care Pharmacies" (NZ) with an org admin, one test worker. **Treat as real; do not wipe.** |
 
 Production has **no demo accounts**. It is a testing deployment on a free `sslip.io` name (not for customers) and a Helsinki server (slow from NZ).
@@ -74,11 +75,10 @@ Git Bash does not ship: run it from WSL or install rsync first. The first SSH fr
 Full list in `TODO.md`. The ones that need an owner decision or real-world input first:
 1. **Confirm NZ rules with a real pharmacy customer** and edit `common/markets.ts`: Pharmacy Council wording, police-vetting requirement, dispensing systems (only "Toniq" and "Corum" are placeholders), accreditations, GST treatment. The questions to ask are in [`docs/NZ_PHARMACY_QUESTIONS.md`](NZ_PHARMACY_QUESTIONS.md); the most urgent is whether every NZ role needs a practising certificate (today every NZ worker does, so a technician without one can never book).
 2. **Decision pending (owner with stakeholders/BA): who may verify a worker's documents** (DECISIONS 7.1). Verification is global today, and with document sharing a worker chooses which organization verifies them. Options, constraints and what each costs are written up in DECISIONS 7.1; nothing is built until it is decided.
-3. **Deploy the verification paths**: operator verification and worker-initiated document sharing (DECISIONS 2.6) are built; the sharing release adds migration `20261003090000_document_shares` (back up first).
-4. **NZ privacy review** before real worker documents are stored (Privacy Act 2020; offshore hosting duties under IPP 12).
-5. **Go-live hosting**: AWS/NZ region, real domain, off-server backups, uptime monitor, SMTP provider, Terraform/secrets management.
-6. Payment file: a real NZ bank-file format needs worker bank details (sensitive PII; not stored). Today: CSV payment batch + accounting CSV.
-7. Smaller: HEIC uploads, per-currency reporting view, push notifications/offline (no service worker on purpose), CI for the browser walkthrough, Prettier, Worker Pro tier.
+3. **NZ privacy review** before real worker documents are stored (Privacy Act 2020; offshore hosting duties under IPP 12).
+4. **Go-live hosting**: AWS/NZ region, real domain, off-server backups, uptime monitor, SMTP provider, Terraform/secrets management.
+5. Payment file: a real NZ bank-file format needs worker bank details (sensitive PII; not stored). Today: CSV payment batch + accounting CSV.
+6. Smaller: HEIC uploads, per-currency reporting view, push notifications/offline (no service worker on purpose), CI for the browser walkthrough, Prettier, Worker Pro tier.
 
 ## Known limitations and sharp edges
 - Hosting is Helsinki; expect ~250-300 ms from NZ.
