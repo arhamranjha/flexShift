@@ -1,6 +1,6 @@
 'use client';
 
-import { type StaffBankMember, type StaffBankTier, gbp } from '@flexshift/api-client';
+import { type StaffBankMember, type StaffBankTier, currencySymbol, money } from '@flexshift/api-client';
 import {
   Badge, Button, Card, CardHeader, EmptyState, ErrorBlock, Field, Input, LoadingBlock, Modal, Select, Textarea,
   th, td, useAction, useAsync,
@@ -10,6 +10,7 @@ import { useState } from 'react';
 import { AddToStaffBankModal, TIERS } from '@/components/AddToStaffBankModal';
 import { Header } from '@/components/Header';
 import { api, useAuth, useScope } from '@/lib/auth';
+import { useMarket } from '@/lib/market';
 
 const SECTION_HINT: Record<StaffBankTier, string> = {
   TIER_1_PREFERRED: 'First call for shifts',
@@ -20,6 +21,7 @@ const SECTION_HINT: Record<StaffBankTier, string> = {
 export default function StaffBankPage() {
   const { user } = useAuth();
   const { orgId, branchId } = useScope();
+  const { currency } = useMarket();
   const { run, busy } = useAction();
   const isAdmin = user?.role === 'ORG_ADMIN' || user?.role === 'SUPER_ADMIN';
 
@@ -122,10 +124,10 @@ export default function StaffBankPage() {
                               <td className={td}>
                                 {m.customHourlyRate != null ? (
                                   <>
-                                    <span className="font-semibold">{gbp(m.customHourlyRate)}</span>
-                                    {w?.hourlyRate != null && <span className="block text-xs text-slate-400">standard {gbp(w.hourlyRate)}</span>}
+                                    <span className="font-semibold">{money(m.customHourlyRate, currency)}</span>
+                                    {w?.hourlyRate != null && <span className="block text-xs text-slate-400">standard {money(w.hourlyRate, currency)}</span>}
                                   </>
-                                ) : w?.hourlyRate != null ? <span>{gbp(w.hourlyRate)} <span className="text-xs text-slate-400">standard</span></span> : '-'}
+                                ) : w?.hourlyRate != null ? <span>{money(w.hourlyRate, currency)} <span className="text-xs text-slate-400">standard</span></span> : '-'}
                               </td>
                               <td className={td}>{w?._count?.assignedShifts ?? '-'}</td>
                               <td className={td}>
@@ -170,7 +172,7 @@ export default function StaffBankPage() {
         title={editing?.reliefWorker ? `Edit ${editing.reliefWorker.firstName} ${editing.reliefWorker.lastName}` : 'Edit member'}
         footer={(<><Button variant="secondary" onClick={() => setEditing(null)}>Cancel</Button><Button onClick={saveEdit} loading={busy} disabled={rateInvalid}>Save</Button></>)}
       >
-        <Field label="Custom hourly rate (£)" error={rateInvalid ? 'Enter a positive number.' : undefined} hint={editing?.reliefWorker?.hourlyRate != null ? `Standard rate ${gbp(editing.reliefWorker.hourlyRate)}/hr` : undefined}>
+        <Field label={`Custom hourly rate (${currencySymbol(currency)})`} error={rateInvalid ? 'Enter a positive number.' : undefined} hint={editing?.reliefWorker?.hourlyRate != null ? `Standard rate ${money(editing.reliefWorker.hourlyRate, currency)}/hr` : undefined}>
           <Input type="number" min="0" step="0.01" value={rate} onChange={(e) => setRate(e.target.value)} />
         </Field>
         <Field label="Notes"><Textarea value={notes} onChange={(e) => setNotes(e.target.value)} maxLength={500} /></Field>

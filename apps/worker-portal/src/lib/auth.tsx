@@ -16,7 +16,7 @@ export const api = createApiClient({
 
 export interface RegisterBody {
   email: string; password: string; firstName: string; lastName: string; phone: string; registrationNumber: string;
-  profession?: string; hourlyRate?: number; minimumShiftRate?: number; systemTags?: string[]; accreditations?: string[];
+  profession?: string; hourlyRate?: number; minimumShiftRate?: number; systemTags?: string[]; accreditations?: string[]; country?: string;
 }
 
 interface AuthState {

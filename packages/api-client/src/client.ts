@@ -68,6 +68,10 @@ export function createApiClient(opts: ClientOptions) {
       changePassword: (currentPassword: string, newPassword: string) =>
         send<{ accessToken: string }>('POST', '/auth/change-password', { currentPassword, newPassword }),
     },
+    markets: {
+      /** Public: needed before sign-in (the registration page). */
+      list: () => get<T.MarketList>('/markets'),
+    },
     analytics: {
       overview: (branchId?: string) => get<T.OverviewStats>('/analytics/overview', { branchId }),
       marketRates: (profession?: string) => get<T.MarketRates>('/analytics/market-rates', { profession }),
@@ -81,7 +85,9 @@ export function createApiClient(opts: ClientOptions) {
     organizations: {
       list: () => get<T.Organization[]>('/organizations'),
       get: (id: string) => get<T.Organization>(`/organizations/${id}`),
-      update: (id: string, body: Partial<Pick<T.Organization, 'name' | 'billingEmail' | 'phone' | 'logoUrl' | 'requiredDocTypes'>>) =>
+      /** Super admins only: creates the organization, its first branch and its people in one step. */
+      onboard: (body: T.OnboardOrganizationInput) => send<T.OnboardOrganizationResult>('POST', '/organizations/onboard', body),
+      update: (id: string, body: Partial<Pick<T.Organization, 'name' | 'billingEmail' | 'phone' | 'logoUrl' | 'requiredDocTypes' | 'country'>>) =>
         send<T.Organization>('PATCH', `/organizations/${id}`, body),
     },
     users: {
@@ -139,7 +145,7 @@ export function createApiClient(opts: ClientOptions) {
       uploadDocument: (workerId: string, form: FormData) => json<T.ComplianceDocument>(`/relief-workers/${workerId}/documents`, { method: 'POST', body: form }),
       /** Documents need the bearer token, so fetch the bytes and hand back a Blob (use URL.createObjectURL). */
       documentBlob: async (docId: string) => (await raw(`/relief-workers/documents/${docId}/file`)).blob(),
-      updatePreferences: (body: { minimumShiftRate?: number | null; hourlyRate?: number | null; bio?: string; systemTags?: string[]; accreditations?: string[] }) =>
+      updatePreferences: (body: { country?: string; minimumShiftRate?: number | null; hourlyRate?: number | null; bio?: string; systemTags?: string[]; accreditations?: string[] }) =>
         send<T.ReliefProfile>('PATCH', '/relief-workers/me/preferences', body),
       toggleWatch: (shiftId: string) => send<{ watched: boolean }>('POST', `/relief-workers/me/watch-shift/${shiftId}`),
       toggleFavourite: (branchId: string) => send<{ favourited: boolean }>('POST', `/relief-workers/me/favourite-branch/${branchId}`),

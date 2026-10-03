@@ -1,10 +1,11 @@
 'use client';
 
 import { Badge, Button, Field, Input, Modal, Select, Textarea, useAction, useAsync } from '@flexshift/ui';
-import { gbp, type ReliefProfile, type StaffBankTier } from '@flexshift/api-client';
+import { currencySymbol, money, type ReliefProfile, type StaffBankTier } from '@flexshift/api-client';
 import { Search, ShieldCheck } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { api, useAuth, useScope } from '@/lib/auth';
+import { useMarket } from '@/lib/market';
 
 export type WorkerPick = Pick<ReliefProfile, 'id' | 'firstName' | 'lastName' | 'profession' | 'registrationNumber' | 'isVerified'> & { hourlyRate?: ReliefProfile['hourlyRate'] };
 
@@ -18,6 +19,7 @@ export function AddToStaffBankModal({
   open, onClose, onAdded, initialWorker,
 }: { open: boolean; onClose: () => void; onAdded: () => void; initialWorker?: WorkerPick | null }) {
   const { user } = useAuth();
+  const { currency, market } = useMarket();
   const { branches, branchId: scopeBranch } = useScope();
   const { run, busy } = useAction();
   const isManager = user?.role === 'FACILITY_MANAGER';
@@ -135,8 +137,8 @@ export function AddToStaffBankModal({
             </div>
           ) : (
             <div className="space-y-2">
-              <Field label="Registration number" error={lookupError} hint="Exact match, e.g. the worker's professional registration number.">
-                <Input value={regNo} onChange={(e) => setRegNo(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && doLookup()} placeholder="e.g. 1-234567" />
+              <Field label="Registration number" error={lookupError} hint={`Exact match on the worker's registration number (${market.registrationBody}).`}>
+                <Input value={regNo} onChange={(e) => setRegNo(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && doLookup()} />
               </Field>
               <Button variant="secondary" onClick={doLookup} loading={looking}>Find worker</Button>
             </div>
@@ -170,8 +172,8 @@ export function AddToStaffBankModal({
             </Select>
           </Field>
           <Field
-            label="Custom hourly rate (£)"
-            hint={picked.hourlyRate != null ? `Worker's standard rate: ${gbp(picked.hourlyRate)}/hr. Leave empty to use it.` : 'Optional.'}
+            label={`Custom hourly rate (${currencySymbol(currency)})`}
+            hint={picked.hourlyRate != null ? `Worker's standard rate: ${money(picked.hourlyRate, currency)}/hr. Leave empty to use it.` : 'Optional.'}
             error={rateInvalid ? 'Enter a positive number.' : undefined}
           >
             <Input type="number" min="0" step="0.01" value={rate} onChange={(e) => setRate(e.target.value)} />

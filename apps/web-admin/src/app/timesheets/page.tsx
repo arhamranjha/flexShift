@@ -1,12 +1,13 @@
 'use client';
 
-import { fmtDate, fmtRange, fmtTime, gbp, toNumber, type Timesheet, type TimesheetStatus } from '@flexshift/api-client';
+import { fmtDate, fmtRange, fmtTime, money, toNumber, type Timesheet, type TimesheetStatus } from '@flexshift/api-client';
 import { Button, Card, EmptyState, ErrorBlock, LoadingBlock, Modal, StatusBadge, td, th, useAction, useAsync, useToast } from '@flexshift/ui';
 import clsx from 'clsx';
 import { AlertTriangle } from 'lucide-react';
 import { useState } from 'react';
 import { Header } from '@/components/Header';
 import { api, useScope } from '@/lib/auth';
+import { useMarket } from '@/lib/market';
 
 type Tab = 'SUBMITTED' | 'APPROVED' | 'SETTLED' | 'ALL';
 const TABS: { key: Tab; label: string }[] = [
@@ -31,6 +32,7 @@ function variance(t: Timesheet) {
 
 export default function TimesheetsPage() {
   const { branches, branchIds, loading: scopeLoading } = useScope();
+  const { currency } = useMarket();
   const toast = useToast();
   const { run, busy } = useAction();
   const [tab, setTab] = useState<Tab>('SUBMITTED');
@@ -128,8 +130,8 @@ export default function TimesheetsPage() {
                         </td>
                         <td className={td}>{t.breakMinutes}m</td>
                         <td className={td}>{toNumber(t.billableHours).toFixed(2)}</td>
-                        <td className={td}>{gbp(t.hourlyRateApplied)}/h</td>
-                        <td className={clsx(td, 'font-semibold')}>{gbp(t.totalPayout)}</td>
+                        <td className={td}>{money(t.hourlyRateApplied, t.shift?.currency ?? currency)}/h</td>
+                        <td className={clsx(td, 'font-semibold')}>{money(t.totalPayout, t.shift?.currency ?? currency)}</td>
                         <td className={td}><StatusBadge status={t.status} /></td>
                         <td className={td}><Button size="sm" variant="secondary" onClick={() => setDetail(t)}>Review</Button></td>
                       </tr>
@@ -170,7 +172,7 @@ export default function TimesheetsPage() {
                   <dd>{fmtRange(detail.clockInTime, detail.clockOutTime)}</dd>
                 </div>
                 <div className="rounded-lg bg-slate-50 p-3"><dt className="text-xs font-semibold text-slate-500">Break</dt><dd>{detail.breakMinutes} min</dd></div>
-                <div className="rounded-lg bg-slate-50 p-3"><dt className="text-xs font-semibold text-slate-500">Billable</dt><dd>{toNumber(detail.billableHours).toFixed(2)} h @ {gbp(detail.hourlyRateApplied)}/h</dd></div>
+                <div className="rounded-lg bg-slate-50 p-3"><dt className="text-xs font-semibold text-slate-500">Billable</dt><dd>{toNumber(detail.billableHours).toFixed(2)} h @ {money(detail.hourlyRateApplied, detail.shift?.currency ?? currency)}/h</dd></div>
               </dl>
               {(v.early || v.late) && (
                 <p className="flex items-center gap-2 text-xs text-amber-800 bg-amber-50 rounded-lg p-3">
@@ -181,7 +183,7 @@ export default function TimesheetsPage() {
                 </p>
               )}
               {detail.notes && <p className="text-sm text-slate-600"><span className="font-semibold">Worker notes:</span> {detail.notes}</p>}
-              <p className="text-right text-lg font-bold text-slate-900">Payout {gbp(detail.totalPayout)}</p>
+              <p className="text-right text-lg font-bold text-slate-900">Payout {money(detail.totalPayout, detail.shift?.currency ?? currency)}</p>
             </>
           );
         })()}
@@ -196,7 +198,7 @@ export default function TimesheetsPage() {
           <>
             <p className="text-sm text-slate-700">
               Approving {confirm.length === 1 ? 'this timesheet' : `${confirm.length} timesheets`} for a total payout of{' '}
-              <span className="font-bold">{gbp(confirmTotal)}</span>.
+              <span className="font-bold">{money(confirmTotal, confirm?.[0]?.shift?.currency ?? currency)}</span>.
             </p>
             <p className="text-sm text-slate-600">{confirm.length === 1 ? 'An invoice' : 'Invoices'} will be generated automatically. This cannot be undone.</p>
           </>

@@ -1,11 +1,12 @@
 'use client';
 
-import { ApiError, fmtRange, gbp, shiftHours, titleCase, type ReliefProfile, type Shift } from '@flexshift/api-client';
+import { ApiError, fmtRange, money, shiftHours, titleCase, type ReliefProfile, type Shift } from '@flexshift/api-client';
 import { Badge, Button, ErrorBlock, Field, Input, LoadingBlock, Modal, StatusBadge, Textarea, useAction, useAsync, useToast } from '@flexshift/ui';
 import { AlertTriangle, Pencil } from 'lucide-react';
 import Link from 'next/link';
 import { useMemo, useState } from 'react';
 import { api, useAuth } from '@/lib/auth';
+import { useMarket } from '@/lib/market';
 
 const workerName = (w?: { firstName: string; lastName: string } | null) => (w ? `${w.firstName} ${w.lastName}` : '');
 
@@ -21,6 +22,7 @@ export function ShiftDetailModal({
 }) {
   const open = !!shiftId;
   const { user } = useAuth();
+  const { currency: marketCurrency } = useMarket();
   const toast = useToast();
   const { run, busy } = useAction();
   const { data: shift, loading, error, reload } = useAsync(
@@ -99,8 +101,8 @@ export function ShiftDetailModal({
             <div><dt className="text-xs text-slate-500">Branch</dt><dd className="font-semibold text-slate-900">{shift.branch?.name ?? '-'}</dd></div>
             <div><dt className="text-xs text-slate-500">Role</dt><dd className="font-semibold text-slate-900">{shift.roleRequired}</dd></div>
             <div className="col-span-2"><dt className="text-xs text-slate-500">When</dt><dd className="font-semibold text-slate-900">{fmtRange(shift.startTime, shift.endTime)} ({shiftHours(shift.startTime, shift.endTime).toFixed(1)}h)</dd></div>
-            <div><dt className="text-xs text-slate-500">Rate</dt><dd className="font-semibold text-slate-900">{gbp(shift.hourlyRate)}/h</dd></div>
-            <div><dt className="text-xs text-slate-500">Estimated pay</dt><dd className="font-semibold text-slate-900">{gbp(shift.totalEstimatedPay)}</dd></div>
+            <div><dt className="text-xs text-slate-500">Rate</dt><dd className="font-semibold text-slate-900">{money(shift.hourlyRate, shift.currency ?? marketCurrency)}/h</dd></div>
+            <div><dt className="text-xs text-slate-500">Estimated pay</dt><dd className="font-semibold text-slate-900">{money(shift.totalEstimatedPay, shift.currency ?? marketCurrency)}</dd></div>
             <div className="col-span-2">
               <dt className="text-xs text-slate-500 mb-1">Requirements</dt>
               <dd className="flex flex-wrap gap-1.5">
@@ -210,7 +212,7 @@ export function ShiftDetailModal({
                   <li key={n.id} className="flex items-center justify-between gap-3 px-3 py-2 text-sm">
                     <span className="font-semibold text-slate-900">{workerName(n.reliefWorker) || 'Worker'}</span>
                     <span className="text-slate-600">
-                      {gbp(n.proposedHourlyRate)}/h{n.counterOfferRate ? ` (counter ${gbp(n.counterOfferRate)})` : ''}
+                      {money(n.proposedHourlyRate, shift.currency ?? marketCurrency)}/h{n.counterOfferRate ? ` (counter ${money(n.counterOfferRate, shift.currency ?? marketCurrency)})` : ''}
                     </span>
                     <StatusBadge status={n.status} />
                   </li>

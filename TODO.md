@@ -27,6 +27,12 @@ Legend: [x] done · [~] partly done · [ ] not started
 - [ ] Prettier / formatting convention
 - [x] Emergency broadcast: notifies every verified worker and ignores minimum-rate thresholds (feed emergencies tab too)
 
+## Markets (NZ first)
+- [x] Markets as data: NZ (default) and GB; currency, timezone, tax, credentials and wording per market; shifts and invoices carry their currency
+- [ ] Confirm the NZ defaults with a pharmacy customer (regulator wording, police-vetting requirements, dispensing-system names, accreditations) and edit `common/markets.ts`
+- [ ] NZ privacy review before real worker documents are stored (Privacy Act 2020, IPP 12 for offshore hosting)
+- [ ] GST: invoices show no tax today; most contractors are probably not GST-registered, so the export defaults to "No GST"
+
 ## Organization dashboard (`apps/web-admin`)
 - [x] Login, forced password change, role-aware navigation, branch scope picker
 - [x] Overview, multi-branch rota (day/week/month, assign, release), shifts (create/edit/publish/cancel, cascade option, market-rate hint)

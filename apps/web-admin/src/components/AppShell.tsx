@@ -4,6 +4,7 @@ import { LoadingBlock } from '@flexshift/ui';
 import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, type ReactNode } from 'react';
 import { ScopeProvider, useAuth } from '@/lib/auth';
+import { MarketProvider } from '@/lib/market';
 import { Sidebar } from '@/components/Sidebar';
 
 const PUBLIC_PATHS = ['/login'];
@@ -27,10 +28,12 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   return (
     <ScopeProvider>
-      <div className="flex min-h-screen">
-        <Sidebar />
-        <div className="flex-1 flex flex-col min-w-0 overflow-y-auto">{children}</div>
-      </div>
+      <MarketProvider>
+        <div className="flex min-h-screen">
+          <Sidebar />
+          <div className="flex-1 flex flex-col min-w-0 overflow-y-auto">{children}</div>
+        </div>
+      </MarketProvider>
     </ScopeProvider>
   );
 }

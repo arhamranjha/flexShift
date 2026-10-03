@@ -23,19 +23,20 @@ ask "Branch code (short and unique, e.g. KIWI-PON-01)"; BRANCH_CODE="$REPLY"
 ask "Street address"; ADDRESS="$REPLY"
 ask "City"; CITY="$REPLY"
 ask "Postcode"; POSTCODE="$REPLY"
-ask "Country" "NZ"; COUNTRY="$REPLY"
+ask "Country (for the address)" "NZ"; COUNTRY="$REPLY"
 ask "Branch phone" "$PHONE"; BRANCH_PHONE="$REPLY"
+ask "Market: NZ (New Zealand) or GB (United Kingdom)" "NZ"; MARKET="$(echo "$REPLY" | tr a-z A-Z)"
 ask "Branch manager email (leave empty for none)" ""; MANAGER="$REPLY"
 
 JSON=$(ORG_NAME="$ORG_NAME" ADMIN_EMAIL="$ADMIN_EMAIL" PHONE="$PHONE" BILLING="$BILLING" BRANCH_NAME="$BRANCH_NAME" \
   BRANCH_CODE="$BRANCH_CODE" ADDRESS="$ADDRESS" CITY="$CITY" POSTCODE="$POSTCODE" COUNTRY="$COUNTRY" \
-  BRANCH_PHONE="$BRANCH_PHONE" MANAGER="$MANAGER" python3 - <<'PY'
+  BRANCH_PHONE="$BRANCH_PHONE" MANAGER="$MANAGER" MARKET="$MARKET" python3 - <<'PY'
 import json, os
 e = os.environ
 d = {
   "orgName": e["ORG_NAME"], "adminEmail": e["ADMIN_EMAIL"], "billingEmail": e["BILLING"], "phone": e["PHONE"],
   "branchName": e["BRANCH_NAME"], "branchCode": e["BRANCH_CODE"], "addressLine1": e["ADDRESS"], "city": e["CITY"],
-  "postcode": e["POSTCODE"], "country": e["COUNTRY"], "branchPhone": e["BRANCH_PHONE"],
+  "postcode": e["POSTCODE"], "country": e["COUNTRY"], "branchPhone": e["BRANCH_PHONE"], "marketCode": e["MARKET"],
 }
 if e["MANAGER"].strip():
     d["managerEmail"] = e["MANAGER"]

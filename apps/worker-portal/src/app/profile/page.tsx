@@ -1,19 +1,19 @@
 'use client';
 
-import { Badge, Button, Card, ErrorBlock, Field, Input, LoadingBlock, Modal, Select, StatusBadge, Textarea, label, useAction, useAsync } from '@flexshift/ui';
-import { DOCUMENT_ACCEPT, DOCUMENT_TYPES_LABEL, documentFileProblem, normalizeDocumentFile, type ComplianceDocument, type DocType, type ReliefProfile } from '@flexshift/api-client';
+import { Badge, Button, Card, ErrorBlock, Field, Input, LoadingBlock, Modal, Select, StatusBadge, Textarea, useAction, useAsync } from '@flexshift/ui';
+import { DOCUMENT_ACCEPT, ALL_DOC_TYPES, DOCUMENT_TYPES_LABEL, currencySymbol, documentFileProblem, findMarket, normalizeDocumentFile, type ComplianceDocument, type DocType, type ReliefProfile } from '@flexshift/api-client';
 import { AlertTriangle, BadgeCheck, CheckCircle2, Circle, LogOut, Upload } from 'lucide-react';
 import { useEffect, useState } from 'react';
-import { ACCREDITATIONS, Chips, PageTitle, SYSTEMS } from '@/components/common';
+import { Chips, PageTitle } from '@/components/common';
 import { api, useAuth } from '@/lib/auth';
+import { useMarket } from '@/lib/market';
 
-const MANDATORY: DocType[] = ['IDENTITY', 'RIGHT_TO_WORK', 'DBS_POLICE_CHECK', 'INDEMNITY_INSURANCE'];
-const OPTIONAL: DocType[] = ['SAFEGUARDING_L3', 'PRACTICE_DECLARATION', 'MANDATORY_TRAINING', 'OTHER'];
-const ALL_TYPES = [...MANDATORY, ...OPTIONAL];
 const DAY = 86_400_000;
 
 export default function ProfilePage() {
   const { user, logout, refresh } = useAuth();
+  const { mandatory: MANDATORY, docLabel } = useMarket();
+  const OPTIONAL = ALL_DOC_TYPES.filter((t) => !MANDATORY.includes(t));
   const profileId = user?.reliefProfile?.id;
   const { data: profile, loading, error, reload } = useAsync(() => api.workers.get(profileId as string), [profileId]);
   const [upload, setUpload] = useState<DocType | null>(null);
@@ -40,7 +40,7 @@ export default function ProfilePage() {
       {(welcome || docs.length === 0) && (
         <div className="rounded-xl bg-emerald-50 border border-emerald-200 p-4 text-sm text-emerald-900">
           <p className="font-bold">Upload your compliance documents to start booking</p>
-          <p className="mt-0.5">Shifts need verified identity, right to work, DBS and indemnity documents. A manager reviews each upload.</p>
+          <p className="mt-0.5">Shifts need these verified documents: {MANDATORY.map((t) => docLabel(t).toLowerCase()).join(', ')}. A manager reviews each upload.</p>
         </div>
       )}
 
@@ -60,7 +60,7 @@ export default function ProfilePage() {
           <span className="text-xs text-slate-500">{MANDATORY.length - missing.length}/{MANDATORY.length} mandatory verified</span>
         </div>
         <div className="space-y-2">
-          {[...MANDATORY, ...OPTIONAL].map((t) => <DocRow key={t} type={t} doc={latest(t)} mandatory={MANDATORY.includes(t)} onUpload={() => setUpload(t)} />)}
+          {[...MANDATORY, ...OPTIONAL].map((t) => <DocRow key={t} type={t} name={docLabel(t)} doc={latest(t)} mandatory={MANDATORY.includes(t)} onUpload={() => setUpload(t)} />)}
         </div>
       </section>
 
@@ -68,12 +68,12 @@ export default function ProfilePage() {
 
       <Button variant="secondary" className="w-full min-h-[48px] text-base" onClick={() => logout()}><LogOut className="w-4 h-4" /> Sign out</Button>
 
-      {upload && <UploadModal profileId={profileId} initialType={upload} onClose={() => setUpload(null)} onDone={() => { setUpload(null); reload(); }} />}
+      {upload && <UploadModal docTypes={ALL_DOC_TYPES} profileId={profileId} initialType={upload} onClose={() => setUpload(null)} onDone={() => { setUpload(null); reload(); }} />}
     </div>
   );
 }
 
-function DocRow({ type, doc, mandatory, onUpload }: { type: DocType; doc?: ComplianceDocument; mandatory: boolean; onUpload: () => void }) {
+function DocRow({ name, doc, mandatory, onUpload }: { name: string; type: DocType; doc?: ComplianceDocument; mandatory: boolean; onUpload: () => void }) {
   const exp = doc?.expiresAt ? new Date(doc.expiresAt).getTime() : undefined;
   const expired = exp !== undefined && exp < Date.now();
   const soon = exp !== undefined && !expired && exp - Date.now() < 30 * DAY;
@@ -83,7 +83,7 @@ function DocRow({ type, doc, mandatory, onUpload }: { type: DocType; doc?: Compl
       <div className="flex items-center gap-3">
         {ok ? <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" /> : <Circle className="w-5 h-5 text-slate-300 shrink-0" />}
         <div className="min-w-0 flex-1">
-          <p className="font-semibold text-sm">{label(type)}{!mandatory && <span className="text-xs text-slate-400 font-normal"> · optional</span>}</p>
+          <p className="font-semibold text-sm">{name}{!mandatory && <span className="text-xs text-slate-400 font-normal"> · optional</span>}</p>
           <p className="text-xs text-slate-500">{doc ? (doc.expiresAt ? `Expires ${new Date(doc.expiresAt).toLocaleDateString('en-GB')}` : 'No expiry date') : 'Not uploaded'}</p>
         </div>
         {doc ? <StatusBadge status={expired ? 'EXPIRED' : doc.status} /> : mandatory ? <Badge tone="rose">Missing</Badge> : null}
@@ -95,8 +95,9 @@ function DocRow({ type, doc, mandatory, onUpload }: { type: DocType; doc?: Compl
   );
 }
 
-function UploadModal({ profileId, initialType, onClose, onDone }: { profileId: string; initialType: DocType; onClose: () => void; onDone: () => void }) {
+function UploadModal({ docTypes, profileId, initialType, onClose, onDone }: { docTypes: DocType[]; profileId: string; initialType: DocType; onClose: () => void; onDone: () => void }) {
   const { run, busy } = useAction();
+  const { docLabel } = useMarket();
   const [type, setType] = useState<DocType>(initialType);
   const [ref, setRef] = useState('');
   const [issue, setIssue] = useState('');
@@ -119,7 +120,7 @@ function UploadModal({ profileId, initialType, onClose, onDone }: { profileId: s
   return (
     <Modal open onClose={onClose} title="Upload document"
       footer={<><Button variant="ghost" className="min-h-[44px]" onClick={onClose}>Cancel</Button><Button className="min-h-[44px]" loading={busy} disabled={!file || !!fileErr || !!dateErr} onClick={submit}>Upload</Button></>}>
-      <Field label="Document type"><Select className="min-h-[44px] text-base" value={type} onChange={(e) => setType(e.target.value as DocType)}>{ALL_TYPES.map((t) => <option key={t} value={t}>{label(t)}</option>)}</Select></Field>
+      <Field label="Document type"><Select className="min-h-[44px] text-base" value={type} onChange={(e) => setType(e.target.value as DocType)}>{docTypes.map((t) => <option key={t} value={t}>{docLabel(t)}</option>)}</Select></Field>
       <Field label="Reference (optional)"><Input maxLength={100} className="min-h-[44px] text-base" value={ref} onChange={(e) => setRef(e.target.value)} /></Field>
       <div className="grid grid-cols-2 gap-3">
         <Field label="Issue date"><Input type="date" className="min-h-[44px] text-base" value={issue} onChange={(e) => setIssue(e.target.value)} /></Field>
@@ -134,6 +135,10 @@ function UploadModal({ profileId, initialType, onClose, onDone }: { profileId: s
 
 function Preferences({ profile, onSaved }: { profile: ReliefProfile; onSaved: () => void }) {
   const { run, busy } = useAction();
+  const { markets, market: current } = useMarket();
+  const [country, setCountry] = useState(profile.country ?? current.code);
+  const market = findMarket(markets, country) ?? current;
+  const symbol = currencySymbol(market.currency);
   const [minRate, setMinRate] = useState(profile.minimumShiftRate != null ? String(Number(profile.minimumShiftRate)) : '');
   const [rate, setRate] = useState(profile.hourlyRate != null ? String(Number(profile.hourlyRate)) : '');
   const [bio, setBio] = useState(profile.bio ?? '');
@@ -142,14 +147,15 @@ function Preferences({ profile, onSaved }: { profile: ReliefProfile; onSaved: ()
   const bad = (v: string) => v !== '' && !(Number(v) >= 0 && Number(v) <= 1000);
   const invalid = bad(minRate) || bad(rate) || bio.length > 1000;
   // Show previously saved custom tags too, not only the suggestions.
-  const sysOptions = Array.from(new Set([...SYSTEMS, ...profile.systemTags]));
-  const accrOptions = Array.from(new Set([...ACCREDITATIONS, ...profile.accreditations]));
+  const sysOptions = Array.from(new Set([...market.systems, ...profile.systemTags]));
+  const accrOptions = Array.from(new Set([...market.accreditations, ...profile.accreditations]));
 
   async function save() {
     const body = {
       // Blank clears the value (null); a number sets it.
       minimumShiftRate: minRate !== '' ? Number(minRate) : null,
       hourlyRate: rate !== '' ? Number(rate) : null,
+      country: market.code,
       bio, systemTags: systems, accreditations: accr,
     };
     if (await run(() => api.workers.updatePreferences(body), 'Preferences saved')) onSaved();
@@ -159,9 +165,14 @@ function Preferences({ profile, onSaved }: { profile: ReliefProfile; onSaved: ()
     <section>
       <h2 className="font-bold mb-2">Preferences</h2>
       <Card className="p-4 space-y-4">
+        <Field label="Country / market">
+          <Select className="min-h-[44px] text-base" value={market.code} onChange={(e) => setCountry(e.target.value)}>
+            {(markets?.markets ?? [market]).map((m) => <option key={m.code} value={m.code}>{m.name}</option>)}
+          </Select>
+        </Field>
         <div className="grid grid-cols-2 gap-3">
-          <Field label="Standard rate (£/hr)" error={bad(rate) ? '0 to 1000' : undefined}><Input type="number" inputMode="decimal" min={0} max={1000} step="0.5" className="min-h-[44px] text-base" value={rate} onChange={(e) => setRate(e.target.value)} /></Field>
-          <Field label="Minimum shift rate (£/hr)" error={bad(minRate) ? '0 to 1000' : undefined} hint="Hides shifts below this"><Input type="number" inputMode="decimal" min={0} max={1000} step="0.5" className="min-h-[44px] text-base" value={minRate} onChange={(e) => setMinRate(e.target.value)} /></Field>
+          <Field label={`Standard rate (${symbol}/hr)`} error={bad(rate) ? '0 to 1000' : undefined}><Input type="number" inputMode="decimal" min={0} max={1000} step="0.5" className="min-h-[44px] text-base" value={rate} onChange={(e) => setRate(e.target.value)} /></Field>
+          <Field label={`Minimum shift rate (${symbol}/hr)`} error={bad(minRate) ? '0 to 1000' : undefined} hint="Hides shifts below this"><Input type="number" inputMode="decimal" min={0} max={1000} step="0.5" className="min-h-[44px] text-base" value={minRate} onChange={(e) => setMinRate(e.target.value)} /></Field>
         </div>
         <Field label="Bio" hint={`${bio.length}/1000`}><Textarea maxLength={1000} value={bio} onChange={(e) => setBio(e.target.value)} /></Field>
         <div><p className="text-xs font-semibold text-slate-700 mb-2">Systems</p><Chips options={sysOptions} value={systems} onChange={setSystems} /></div>

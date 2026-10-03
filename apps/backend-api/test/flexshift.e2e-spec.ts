@@ -1126,4 +1126,37 @@ describe('automation: cascade, expiry, notifications, checklists, benchmarks', (
       expect((await patch(tok, '/relief-workers/me/preferences', { country: 'GB' }).expect(200)).body.country).toBe('GB');
     });
   });
+
+  it('lets a super admin onboard a customer through the API, and nobody else', async () => {
+    const body = {
+      orgName: 'Southern Lakes Pharmacy', adminEmail: 'Boss@SouthernLakes.test', phone: '+64 3 555 0100', branchName: 'Queenstown', branchCode: 'sl-qtn-01',
+      addressLine1: '5 Shotover Street', city: 'Queenstown', postcode: '9300', managerEmail: 'mgr@southernlakes.test',
+    };
+    await post(adminT, '/organizations/onboard', body).expect(403); // org admins cannot create other organizations
+    await post(richmondT, '/organizations/onboard', body).expect(403);
+    await post(sarahT, '/organizations/onboard', body).expect(403);
+    await post(superT, '/organizations/onboard', { ...body, adminEmail: 'not-an-email' }).expect(400);
+    await post(superT, '/organizations/onboard', { ...body, marketCode: 'FR' }).expect(400);
+    await post(superT, '/organizations/onboard', { ...body, extra: 'field' }).expect(400); // strict validation
+
+    const res = (await post(superT, '/organizations/onboard', body).expect(201)).body;
+    expect(res.users.map((u: any) => u.role).sort()).toEqual(['FACILITY_MANAGER', 'ORG_ADMIN']);
+    expect(res.users.every((u: any) => u.temporaryPassword.length >= 10)).toBe(true);
+    const org = await prisma.organization.findUnique({ where: { id: res.organizationId } });
+    expect(org).toMatchObject({ country: 'NZ', currency: 'NZD', timezone: 'Pacific/Auckland' }); // new customers default to NZ
+
+    // plain-language problems come back as 400, with nothing half-created
+    const before = await prisma.user.count();
+    const dup = await post(superT, '/organizations/onboard', { ...body, adminEmail: 'other@southernlakes.test', managerEmail: undefined }).expect(400);
+    expect(dup.body.message).toMatch(/already exists|already in use/);
+    expect(await prisma.user.count()).toBe(before);
+
+    // the overview lists every organization with its admins for the super admin, only its own for an org admin
+    const all = (await get(superT, '/organizations').expect(200)).body;
+    const created = all.find((o: any) => o.id === res.organizationId);
+    expect(created.users.map((u: any) => u.email)).toEqual(['boss@southernlakes.test']);
+    expect(created.users[0].mustChangePassword).toBe(true);
+    expect(all.length).toBeGreaterThan(2);
+    expect((await get(adminT, '/organizations').expect(200)).body.map((o: any) => o.id)).toEqual([apexId]);
+  });
 });

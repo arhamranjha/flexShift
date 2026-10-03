@@ -1,12 +1,9 @@
 'use client';
 
-import { type ComplianceDocument, type DocType } from '@flexshift/api-client';
-import { Badge, label } from '@flexshift/ui';
+import { type ComplianceDocument } from '@flexshift/api-client';
+import { Badge } from '@flexshift/ui';
 import { CheckCircle2, Circle } from 'lucide-react';
-
-export const MANDATORY_DOCS: DocType[] = ['IDENTITY', 'RIGHT_TO_WORK', 'DBS_POLICE_CHECK', 'INDEMNITY_INSURANCE'];
-export const DOC_TYPES: DocType[] = [...MANDATORY_DOCS, 'SAFEGUARDING_L3', 'PRACTICE_DECLARATION', 'MANDATORY_TRAINING', 'OTHER'];
-export const docTypeLabel = (t: string) => (t === 'DBS_POLICE_CHECK' ? 'DBS / Police check' : label(t));
+import { useMarket } from '@/lib/market';
 
 export const fmtLong = (iso?: string | null) =>
   iso ? new Date(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : '-';
@@ -32,14 +29,15 @@ export function ExpiryCell({ iso }: { iso?: string | null }) {
 export const isValidDoc = (d: ComplianceDocument) => d.status === 'VERIFIED' && expiryState(d.expiresAt) !== 'expired';
 
 export function MandatoryChecklist({ documents }: { documents: ComplianceDocument[] }) {
+  const { mandatory, docLabel } = useMarket();
   return (
     <ul className="grid grid-cols-2 gap-2">
-      {MANDATORY_DOCS.map((t) => {
+      {mandatory.map((t) => {
         const ok = documents.some((d) => d.type === t && isValidDoc(d));
         return (
           <li key={t} className={`flex items-center gap-2 text-xs rounded-lg border px-3 py-2 ${ok ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-slate-200 text-slate-600'}`}>
             {ok ? <CheckCircle2 className="w-4 h-4 text-emerald-600" /> : <Circle className="w-4 h-4 text-slate-300" />}
-            {docTypeLabel(t)}
+            {docLabel(t)}
           </li>
         );
       })}

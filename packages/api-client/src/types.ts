@@ -4,7 +4,7 @@ export type ShiftVisibility = 'STAFF_BANK_ONLY' | 'PUBLIC_MARKETPLACE' | 'EMERGE
 export type NegotiationStatus = 'PENDING' | 'COUNTERED' | 'ACCEPTED' | 'REJECTED';
 export type DocType =
   | 'IDENTITY' | 'RIGHT_TO_WORK' | 'DBS_POLICE_CHECK' | 'INDEMNITY_INSURANCE'
-  | 'SAFEGUARDING_L3' | 'PRACTICE_DECLARATION' | 'MANDATORY_TRAINING' | 'OTHER';
+  | 'SAFEGUARDING_L3' | 'PRACTICE_DECLARATION' | 'PRACTISING_CERTIFICATE' | 'MANDATORY_TRAINING' | 'OTHER';
 export type DocStatus = 'PENDING' | 'VERIFIED' | 'REJECTED' | 'EXPIRED';
 export type TimesheetStatus = 'PENDING_SUBMISSION' | 'SUBMITTED' | 'APPROVED' | 'DISPUTED' | 'SETTLED';
 export type InvoiceStatus = 'DRAFT' | 'ISSUED' | 'PAID' | 'CANCELLED';
@@ -30,6 +30,8 @@ export interface ReliefProfile {
   isVerified: boolean;
   yearsCommunityExperience?: number;
   yearsHospitalExperience?: number;
+  /** Market the worker is registered in (NZ | GB): selects registration wording. */
+  country?: string;
   documents?: ComplianceDocument[];
   user?: { id: string; email: string; isActive?: boolean };
   staffBankMemberships?: StaffBankMember[];
@@ -56,6 +58,12 @@ export interface Organization {
   logoUrl?: string | null;
   /** Extra credentials required on top of the platform-wide mandatory four. */
   requiredDocTypes?: DocType[];
+  /** Market code (NZ | GB) with the currency and timezone it implies. */
+  country?: string;
+  currency?: string;
+  timezone?: string;
+  /** Organization admins (the list endpoint includes them for the super-admin overview). */
+  users?: { id: string; email: string; isActive: boolean; mustChangePassword: boolean; lastLoginAt?: string | null }[];
   branches?: FacilityBranch[];
   _count?: { branches: number; staffBankMembers: number; users: number };
 }
@@ -86,6 +94,8 @@ export interface Shift {
   endTime: string;
   hourlyRate: Money;
   totalEstimatedPay: Money;
+  /** ISO currency of this shift's money (set from the organization when the shift is created). */
+  currency?: string;
   requiredSystems: string[];
   requiredAccreditations: string[];
   visibility: ShiftVisibility;
@@ -226,6 +236,8 @@ export interface OverviewStats {
   fillRate: number | null;
   staffBankHeadcount: number;
   monthSpend: number;
+  /** Currency of the totals; null when the organizations in scope use more than one. */
+  currency?: string | null;
   pendingTimesheets: number;
   pendingLeave: number;
   pendingNegotiations: number;
@@ -277,4 +289,59 @@ export interface MarketRates {
   median: number | null;
   p75: number | null;
   average: number | null;
+}
+
+export type MarketCode = 'NZ' | 'GB';
+
+/** Country-specific rules and wording, served by GET /markets. */
+export interface Market {
+  code: MarketCode;
+  name: string;
+  currency: string;
+  timezone: string;
+  locale: string;
+  taxName: string;
+  taxRatePercent: number;
+  accountingTaxType: string;
+  /** Professional register(s) a worker's registration number belongs to. */
+  registrationBody: string;
+  /** Credentials required in this market on top of the four every worker needs. */
+  extraMandatoryDocs: DocType[];
+  docLabels: Partial<Record<DocType, string>>;
+  professions: string[];
+  /** Suggestions only; free text is always allowed. */
+  systems: string[];
+  accreditations: string[];
+  phoneExample: string;
+}
+
+export interface MarketList {
+  default: MarketCode;
+  markets: Market[];
+}
+
+export interface OnboardOrganizationInput {
+  orgName: string;
+  adminEmail: string;
+  billingEmail?: string;
+  phone: string;
+  branchName: string;
+  branchCode: string;
+  addressLine1: string;
+  addressLine2?: string;
+  city: string;
+  postcode: string;
+  country?: string;
+  branchPhone?: string;
+  managerEmail?: string;
+  /** NZ (default) or GB. */
+  marketCode?: MarketCode;
+}
+
+export interface OnboardOrganizationResult {
+  organizationId: string;
+  organizationCode: string;
+  branchId: string;
+  /** One-time temporary passwords: shown once, each person must change theirs at first sign-in. */
+  users: { email: string; role: Role; temporaryPassword: string }[];
 }

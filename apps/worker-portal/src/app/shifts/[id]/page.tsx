@@ -1,12 +1,13 @@
 'use client';
 
 import { Badge, Button, Card, ErrorBlock, Field, Input, LoadingBlock, Modal, StatusBadge, Textarea, useAction, useAsync } from '@flexshift/ui';
-import { fmtRange, gbp, shiftHours, toNumber, type Shift } from '@flexshift/api-client';
+import { currencySymbol, fmtRange, money, shiftHours, toNumber, type Shift } from '@flexshift/api-client';
 import { Check, Heart, MapPin, Phone, Timer, X } from 'lucide-react';
 import { useParams } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { PageTitle, Payout, ProblemList, ShiftBadges, eligibilityProblems } from '@/components/common';
 import { api, useAuth } from '@/lib/auth';
+import { useMarket } from '@/lib/market';
 
 type Dialog = null | 'instant' | 'apply' | 'negotiate';
 
@@ -80,6 +81,7 @@ function ClockCard({ shift, onChanged }: { shift: Shift; onChanged: () => void }
 export default function ShiftDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { user } = useAuth();
+  const { currency: mine, symbol: mySymbol } = useMarket();
   const profile = user?.reliefProfile;
   const { data: shift, loading, error, reload } = useAsync(() => api.shifts.get(id), [id]);
   const { run, busy } = useAction();
@@ -96,6 +98,8 @@ export default function ShiftDetailPage() {
   const have = (list: string[] | undefined) => new Set((list ?? []).map((s) => s.trim().toLowerCase()));
   const mySystems = have(profile?.systemTags);
   const myAccr = have(profile?.accreditations);
+  const currency = shift.currency ?? mine;
+  const symbol = shift.currency ? currencySymbol(shift.currency) : mySymbol;
   const hours = shiftHours(shift.startTime, shift.endTime);
   const biddable = shift.status === 'OPEN' || shift.status === 'IN_NEGOTIATION';
   const isMine = !!profile && shift.assignedWorkerId === profile.id;
@@ -117,7 +121,7 @@ export default function ShiftDetailPage() {
   }
 
   const rateNum = Number(rate);
-  const rateErr = rate !== '' && !(rateNum >= 1 && rateNum <= 1000) ? 'Enter a rate between £1 and £1000' : undefined;
+  const rateErr = rate !== '' && !(rateNum >= 1 && rateNum <= 1000) ? `Enter a rate between ${symbol}1 and ${symbol}1000` : undefined;
 
   async function toggleWatch() {
     const prev = isWatched;
@@ -147,7 +151,7 @@ export default function ShiftDetailPage() {
           </div>
           <div className="rounded-lg bg-slate-50 p-3 text-sm">
             <p className="font-semibold text-slate-900">{fmtRange(shift.startTime, shift.endTime)}</p>
-            <p className="text-slate-600">{shift.roleRequired} · {hours.toFixed(1)} hours at {gbp(shift.hourlyRate)}/hr</p>
+            <p className="text-slate-600">{shift.roleRequired} · {hours.toFixed(1)} hours at {money(shift.hourlyRate, currency)}/hr</p>
           </div>
           <div className="flex items-center gap-2 flex-wrap"><StatusBadge status={shift.status} /><ShiftBadges shift={shift} /></div>
           {isMine && <Badge tone="emerald" className="!text-sm !px-3 !py-1">You are booked on this shift</Badge>}
@@ -177,11 +181,11 @@ export default function ShiftDetailPage() {
         {activeNeg && (
           <Card className="p-4 space-y-3">
             <div className="flex items-center justify-between"><h3 className="text-sm font-bold">Your rate negotiation</h3><StatusBadge status={activeNeg.status} /></div>
-            <p className="text-sm text-slate-600">You proposed <b>{gbp(activeNeg.proposedHourlyRate)}/hr</b>.</p>
+            <p className="text-sm text-slate-600">You proposed <b>{money(activeNeg.proposedHourlyRate, currency)}/hr</b>.</p>
             {activeNeg.status === 'COUNTERED' && activeNeg.counterOfferRate != null ? (
               <>
                 <div className="rounded-lg bg-violet-50 border border-violet-200 p-3 text-sm">
-                  The manager countered with <b>{gbp(activeNeg.counterOfferRate)}/hr</b>, a payout of <b>{gbp(toNumber(activeNeg.counterOfferRate) * hours)}</b>.
+                  The manager countered with <b>{money(activeNeg.counterOfferRate, currency)}/hr</b>, a payout of <b>{money(toNumber(activeNeg.counterOfferRate) * hours, currency)}</b>.
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <Button variant="danger" className="min-h-[44px] text-base" disabled={busy} onClick={() => act(() => api.negotiations.reject(activeNeg.id), 'Counter offer declined')}>Decline</Button>
@@ -199,7 +203,7 @@ export default function ShiftDetailPage() {
         {biddable && !isMine && (
           <div className="space-y-2">
             {shift.instantBookEnabled && shift.status === 'OPEN' && (
-              <Button className="w-full min-h-[48px] text-base" onClick={() => open('instant')}>Instant Book · {gbp(toNumber(shift.hourlyRate) * hours)}</Button>
+              <Button className="w-full min-h-[48px] text-base" onClick={() => open('instant')}>Instant Book · {money(toNumber(shift.hourlyRate) * hours, currency)}</Button>
             )}
             {!application && <Button variant="secondary" className="w-full min-h-[48px] text-base" onClick={() => open('apply')}>Apply for this shift</Button>}
             {!activeNeg && <Button variant="secondary" className="w-full min-h-[48px] text-base" onClick={() => open('negotiate')}>Negotiate rate</Button>}
@@ -211,7 +215,7 @@ export default function ShiftDetailPage() {
         open={dialog === 'instant'} onClose={() => setDialog(null)} title="Confirm Instant Book"
         footer={<><Button variant="ghost" className="min-h-[44px]" onClick={() => setDialog(null)}>Cancel</Button><Button className="min-h-[44px]" loading={busy} onClick={() => act(() => api.shifts.instantBook(id), 'Shift booked')}>Book now</Button></>}
       >
-        <p className="text-sm">Book <b>{shift.branch?.name}</b> on {fmtRange(shift.startTime, shift.endTime)} for {gbp(toNumber(shift.hourlyRate) * hours)}? You will be confirmed immediately.</p>
+        <p className="text-sm">Book <b>{shift.branch?.name}</b> on {fmtRange(shift.startTime, shift.endTime)} for {money(toNumber(shift.hourlyRate) * hours, currency)}? You will be confirmed immediately.</p>
         {problems && <ProblemList problems={problems} />}
       </Modal>
 
@@ -227,8 +231,8 @@ export default function ShiftDetailPage() {
         open={dialog === 'negotiate'} onClose={() => setDialog(null)} title="Negotiate rate"
         footer={<><Button variant="ghost" className="min-h-[44px]" onClick={() => setDialog(null)}>Cancel</Button><Button className="min-h-[44px]" loading={busy} disabled={!rate || !!rateErr} onClick={() => act(() => api.negotiations.create({ shiftId: id, proposedHourlyRate: rateNum, ...(message.trim() && { message: message.trim() }) }), 'Offer sent')}>Send offer</Button></>}
       >
-        <p className="text-sm text-slate-600">Advertised rate is {gbp(shift.hourlyRate)}/hr.</p>
-        <Field label="Your proposed hourly rate (£)" error={rateErr} hint={rate && !rateErr ? `Payout: ${gbp(rateNum * hours)}` : undefined}>
+        <p className="text-sm text-slate-600">Advertised rate is {money(shift.hourlyRate, currency)}/hr.</p>
+        <Field label={`Your proposed hourly rate (${symbol})`} error={rateErr} hint={rate && !rateErr ? `Payout: ${money(rateNum * hours, currency)}` : undefined}>
           <Input type="number" inputMode="decimal" min={1} max={1000} step="0.5" className="min-h-[44px] text-base" value={rate} onChange={(e) => setRate(e.target.value)} />
         </Field>
         <Field label="Message (optional)"><Textarea maxLength={500} value={message} onChange={(e) => setMessage(e.target.value)} /></Field>

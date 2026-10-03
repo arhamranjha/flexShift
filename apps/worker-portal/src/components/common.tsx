@@ -1,11 +1,12 @@
 'use client';
 
 import { Badge, Button } from '@flexshift/ui';
-import { gbp, shiftHours, toNumber, type Shift } from '@flexshift/api-client';
+import { ALL_DOC_TYPES, money, shiftHours, toNumber, type DocType, type Shift } from '@flexshift/api-client';
 import clsx from 'clsx';
 import { ChevronLeft } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import type { ReactNode } from 'react';
+import { useMarket } from '@/lib/market';
 
 export const tap = 'min-h-[44px]';
 export const bigBtn = 'min-h-[44px] text-base';
@@ -46,8 +47,6 @@ export function Chips({ options, value, onChange }: { options: readonly string[]
   );
 }
 
-export const SYSTEMS = ['ProScript', 'Columbus', 'Nexphase', 'PharmOutcomes', 'EMIS', 'SystmOne', 'Titan', 'Methods'] as const;
-export const ACCREDITATIONS = ['CPCS', 'Flu Vaccination', 'Safeguarding Level 3', 'NMS', 'Independent Prescriber', 'Travel Health', 'Contraception Service'] as const;
 
 /** Rate x hours, the amount the worker receives. */
 export const grossPayout = (s: Pick<Shift, 'hourlyRate' | 'startTime' | 'endTime'>) => toNumber(s.hourlyRate) * shiftHours(s.startTime, s.endTime);
@@ -64,22 +63,28 @@ export function ShiftBadges({ shift }: { shift: Shift }) {
 }
 
 export function Payout({ shift }: { shift: Shift }) {
+  const { currency } = useMarket();
   const hours = shiftHours(shift.startTime, shift.endTime);
+  const cur = shift.currency ?? currency;
   return (
     <div className="text-right shrink-0">
-      <div className="text-lg font-extrabold text-emerald-700 leading-tight">{gbp(grossPayout(shift))}</div>
-      <div className="text-[11px] text-slate-500">{gbp(shift.hourlyRate)}/hr · {hours.toFixed(1)}h</div>
+      <div className="text-lg font-extrabold text-emerald-700 leading-tight">{money(grossPayout(shift), cur)}</div>
+      <div className="text-[11px] text-slate-500">{money(shift.hourlyRate, cur)}/hr · {hours.toFixed(1)}h</div>
       <div className="text-[11px] font-semibold text-emerald-700">You keep 100%</div>
     </div>
   );
 }
 
+const DOC_TOKEN = new RegExp(`\\b(${ALL_DOC_TYPES.join('|')})\\b`, 'g');
+
 export function ProblemList({ problems }: { problems: string[] }) {
+  const { docLabel } = useMarket();
+  const text = (p: string) => p.replace(DOC_TOKEN, (t) => docLabel(t as DocType));
   return (
     <div className="rounded-lg bg-rose-50 border border-rose-200 p-3 text-sm space-y-2">
       <p className="font-bold text-rose-800">You are not eligible for this shift yet</p>
       <ul className="space-y-1 text-rose-800">
-        {problems.map((p) => <li key={p} className="flex gap-2"><span aria-hidden>✗</span><span>{p}</span></li>)}
+        {problems.map((p) => <li key={p} className="flex gap-2"><span aria-hidden>✗</span><span>{text(p)}</span></li>)}
       </ul>
       <a href="/profile"><Button variant="secondary" className="w-full min-h-[44px] mt-1">Fix in my profile</Button></a>
     </div>

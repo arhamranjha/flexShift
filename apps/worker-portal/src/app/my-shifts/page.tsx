@@ -1,7 +1,7 @@
 'use client';
 
 import { Badge, Button, EmptyState, ErrorBlock, Field, Input, LoadingBlock, Modal, StatusBadge, Textarea, useAction, useAsync } from '@flexshift/ui';
-import { fmtRange, gbp, type Shift } from '@flexshift/api-client';
+import { fmtRange, money, type Shift } from '@flexshift/api-client';
 import clsx from 'clsx';
 import { CalendarDays, ChevronLeft, ChevronRight, List } from 'lucide-react';
 import Link from 'next/link';
@@ -9,6 +9,7 @@ import { useMemo, useState } from 'react';
 import { PageTitle } from '@/components/common';
 import { ShiftCard } from '@/components/ShiftCard';
 import { api } from '@/lib/auth';
+import { useMarket } from '@/lib/market';
 
 const SEGMENTS = [
   { id: 'watching', label: 'Watching' },
@@ -27,6 +28,7 @@ const toLocalInput = (d: Date) => {
 const dayKey = (d: Date) => `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
 
 export default function MyShiftsPage() {
+  const { currency } = useMarket();
   const { data, loading, error, reload } = useAsync(() => api.shifts.mine(), []);
   const [seg, setSeg] = useState<Segment>('booked');
   const [view, setView] = useState<'list' | 'calendar'>('list');
@@ -77,7 +79,7 @@ export default function MyShiftsPage() {
               {seg === 'watching' && (data.watching.length ? data.watching.map((s) => <ShiftCard key={s.id} shift={s} />) : <EmptyState title="Nothing watched" hint="Watch shifts from the feed to track them here." />)}
               {seg === 'negotiating' && (data.negotiations.length ? data.negotiations.map((n) => (
                 <Row key={n.id} shift={n.shift} badge={<StatusBadge status={n.status} />}
-                  extra={<>Your offer {gbp(n.proposedHourlyRate)}/hr{n.status === 'COUNTERED' && n.counterOfferRate != null && <b className="text-violet-700"> · Counter {gbp(n.counterOfferRate)}/hr. Tap to respond</b>}</>} />
+                  extra={<>Your offer {money(n.proposedHourlyRate, n.shift?.currency ?? currency)}/hr{n.status === 'COUNTERED' && n.counterOfferRate != null && <b className="text-violet-700"> · Counter {money(n.counterOfferRate, n.shift?.currency ?? currency)}/hr. Tap to respond</b>}</>} />
               )) : <EmptyState title="No negotiations" hint="Propose a different rate on any shift." />)}
               {seg === 'applied' && (data.applications.length ? data.applications.map((a) => (
                 <Row key={a.id} shift={a.shift} badge={<StatusBadge status={a.status} />} extra={a.notes ?? undefined} />

@@ -1,12 +1,13 @@
 'use client';
 
-import type { DocType, FacilityBranch } from '@flexshift/api-client';
+import { ALL_DOC_TYPES, BASE_MANDATORY_DOCS, docLabel, findMarket, type DocType, type FacilityBranch } from '@flexshift/api-client';
 import { Badge, Button, Card, CardHeader, EmptyState, ErrorBlock, Field, Input, LoadingBlock, Modal, Select, label, td, th, useAction, useAsync, useToast } from '@flexshift/ui';
 import { Copy, Plus } from 'lucide-react';
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { Header } from '@/components/Header';
 import { api, useAuth, useScope } from '@/lib/auth';
+import { useMarket } from '@/lib/market';
 
 export default function SettingsPage() {
   const { user } = useAuth();
@@ -28,6 +29,7 @@ function SettingsView() {
   const { orgId } = useScope();
   const toast = useToast();
   const { run, busy } = useAction();
+  const mkt = useMarket();
 
   const org = useAsync(async () => (orgId ? api.organizations.get(orgId) : null), [orgId]);
   const branches = useAsync(() => api.branches.list(), []);
@@ -35,10 +37,13 @@ function SettingsView() {
 
   const [orgForm, setOrgForm] = useState({ name: '', billingEmail: '', phone: '' });
   const [extraDocs, setExtraDocs] = useState<DocType[]>([]);
+  const [country, setCountry] = useState('');
+  const [savingMarket, setSavingMarket] = useState(false);
   useEffect(() => {
     if (org.data) {
       setOrgForm({ name: org.data.name, billingEmail: org.data.billingEmail, phone: org.data.phone });
       setExtraDocs(org.data.requiredDocTypes ?? []);
+      setCountry(org.data.country ?? '');
     }
   }, [org.data]);
 
@@ -63,7 +68,15 @@ function SettingsView() {
     const res = await run(() => api.organizations.update(orgId, {
       name: orgForm.name.trim(), billingEmail: orgForm.billingEmail.trim(), phone: orgForm.phone.trim(), requiredDocTypes: extraDocs,
     }), 'Organization updated');
-    if (res) org.reload();
+    if (res) { org.reload(); mkt.reload(); }
+  }
+
+  async function saveMarket() {
+    if (!orgId || !country) return;
+    setSavingMarket(true);
+    const res = await run(() => api.organizations.update(orgId, { country }), 'Market updated');
+    setSavingMarket(false);
+    if (res) { org.reload(); mkt.reload(); }
   }
 
   async function saveBranch() {
@@ -98,6 +111,10 @@ function SettingsView() {
     if (await run(() => api.users.update(id, { isActive }), isActive ? 'User reactivated' : 'User deactivated')) users.reload();
   }
 
+  // Credentials already mandatory in the market need no extra tick.
+  const orgMarket = findMarket(mkt.markets, country || org.data?.country) ?? mkt.market;
+  const marketMandatory = [...BASE_MANDATORY_DOCS, ...orgMarket.extraMandatoryDocs];
+  const optionalDocs = ALL_DOC_TYPES.filter((t) => !marketMandatory.includes(t));
   const branchValid = bf.name.trim() && (branchModal !== 'new' || bf.branchCode.trim()) && bf.addressLine1.trim() && bf.city.trim() && bf.postcode.trim() && bf.phone.trim();
   const inviteValid = /\S+@\S+\.\S+/.test(inv.email) && (inv.role === 'ORG_ADMIN' || inv.branchId);
 
@@ -117,10 +134,10 @@ function SettingsView() {
                 <fieldset className="border border-slate-200 rounded-lg p-4">
                   <legend className="px-1 text-xs font-semibold text-slate-700">Additional required credentials</legend>
                   <p className="text-xs text-slate-500 mb-3">
-                    Every worker already needs verified, in-date Identity, Right to Work, DBS and Indemnity documents. Tick anything else your organization insists on before a worker can be booked.
+                    Every worker already needs verified, in-date {marketMandatory.map((t) => docLabel(orgMarket, t)).join(', ')} documents. Tick anything else your organization insists on before a worker can be booked.
                   </p>
                   <div className="grid grid-cols-2 gap-2">
-                    {(['SAFEGUARDING_L3', 'PRACTICE_DECLARATION', 'MANDATORY_TRAINING', 'OTHER'] as DocType[]).map((t) => (
+                    {optionalDocs.map((t) => (
                       <label key={t} className="inline-flex items-center gap-2 text-sm text-slate-700">
                         <input
                           type="checkbox"
@@ -128,12 +145,39 @@ function SettingsView() {
                           onChange={(e) => setExtraDocs(e.target.checked ? [...extraDocs, t] : extraDocs.filter((x) => x !== t))}
                           className="rounded border-slate-300 text-emerald-600"
                         />
-                        {label(t)}
+                        {docLabel(orgMarket, t)}
                       </label>
                     ))}
                   </div>
                 </fieldset>
                 <div><Button loading={busy} disabled={!orgForm.name.trim()} onClick={saveOrg}>Save changes</Button></div>
+              </div>
+            )}
+          </div>
+        </Card>
+
+        <Card>
+          <CardHeader title="Market" />
+          <div className="p-5">
+            {org.loading ? <LoadingBlock /> : !orgId ? <p className="text-sm text-slate-500">Market settings apply to an organization. Sign in as an organization admin to change them.</p> : (
+              <div className="grid gap-4 max-w-xl">
+                <Field label="Country / market">
+                  <Select value={country} onChange={(e) => setCountry(e.target.value)}>
+                    {!country && <option value="">Select a market</option>}
+                    {(mkt.markets?.markets ?? []).map((m) => <option key={m.code} value={m.code}>{m.name}</option>)}
+                  </Select>
+                </Field>
+                {orgMarket && country && (
+                  <dl className="grid grid-cols-3 gap-3 text-sm">
+                    <div><dt className="text-xs text-slate-500">Currency</dt><dd className="font-semibold text-slate-900">{orgMarket.currency}</dd></div>
+                    <div><dt className="text-xs text-slate-500">Timezone</dt><dd className="font-semibold text-slate-900">{orgMarket.timezone}</dd></div>
+                    <div><dt className="text-xs text-slate-500">Tax</dt><dd className="font-semibold text-slate-900">{orgMarket.taxName} {orgMarket.taxRatePercent}%</dd></div>
+                  </dl>
+                )}
+                <p className="text-xs text-slate-500">
+                  Changing the market affects new shifts, invoices and credential wording from now on. Existing shifts and invoices keep the currency they were created with.
+                </p>
+                <div><Button loading={savingMarket} disabled={!country || country === org.data?.country} onClick={saveMarket}>Save market</Button></div>
               </div>
             )}
           </div>

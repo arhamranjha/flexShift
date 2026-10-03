@@ -1,14 +1,15 @@
 'use client';
 
-import { fmtRange, gbp } from '@flexshift/api-client';
+import { fmtRange, money } from '@flexshift/api-client';
 import { Badge, Card, CardHeader, EmptyState, ErrorBlock, LoadingBlock, StatusBadge, useAsync } from '@flexshift/ui';
 import {
-  AlertOctagon, CalendarCheck, CalendarClock, ChevronRight, Clock, FileCheck2, Handshake, Palmtree, PoundSterling, Target, Users,
+  AlertOctagon, CalendarCheck, CalendarClock, ChevronRight, Clock, FileCheck2, Handshake, Palmtree, Banknote, Target, Users,
 } from 'lucide-react';
 import Link from 'next/link';
 import type { ReactNode } from 'react';
 import { Header } from '@/components/Header';
 import { api, useScope } from '@/lib/auth';
+import { useMarket } from '@/lib/market';
 
 function Stat({ label, value, icon, tone = 'emerald', href, hint }: {
   label: string; value: ReactNode; icon: ReactNode; tone?: 'emerald' | 'rose' | 'amber' | 'sky' | 'violet'; href?: string; hint?: string;
@@ -34,6 +35,7 @@ function Stat({ label, value, icon, tone = 'emerald', href, hint }: {
 
 export default function OverviewPage() {
   const { branchId, branchIds, loading: scopeLoading } = useScope();
+  const { currency } = useMarket();
   const { data, loading, error, reload } = useAsync(
     () => (branchIds.length ? api.analytics.overview(branchId || undefined) : Promise.resolve(undefined)),
     [branchId, branchIds.join(',')],
@@ -61,7 +63,7 @@ export default function OverviewPage() {
                 hint={data.fillRate === null ? 'No shifts in the last 30 days' : undefined}
               />
               <Stat label="Staff bank headcount" value={data.staffBankHeadcount} icon={<Users className="w-5 h-5" />} tone="violet" href="/staff-bank" />
-              <Stat label="Spend this month" value={gbp(data.monthSpend)} icon={<PoundSterling className="w-5 h-5" />} />
+              <Stat label="Spend this month" value={money(data.monthSpend, data.currency ?? currency)} icon={<Banknote className="w-5 h-5" />} />
               <Stat label="Pending timesheets" value={data.pendingTimesheets} icon={<Clock className="w-5 h-5" />} tone="amber" href="/timesheets" />
               <Stat label="Pending leave" value={data.pendingLeave} icon={<Palmtree className="w-5 h-5" />} tone="amber" href="/leave" />
               <Stat label="Pending negotiations" value={data.pendingNegotiations} icon={<Handshake className="w-5 h-5" />} tone="violet" href="/negotiations" />
@@ -83,7 +85,7 @@ export default function OverviewPage() {
                         </div>
                         <div className="flex items-center gap-2 shrink-0">
                           {s.isEmergency && <Badge tone="rose">Emergency</Badge>}
-                          <span className="text-sm font-semibold text-slate-700">{gbp(s.hourlyRate)}/h</span>
+                          <span className="text-sm font-semibold text-slate-700">{money(s.hourlyRate, s.currency ?? currency)}/h</span>
                           <StatusBadge status={s.status} />
                           <ChevronRight className="w-4 h-4 text-slate-400" />
                         </div>

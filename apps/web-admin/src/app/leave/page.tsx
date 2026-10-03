@@ -7,6 +7,7 @@ import Link from 'next/link';
 import { useState } from 'react';
 import { Header } from '@/components/Header';
 import { api, useScope } from '@/lib/auth';
+import { useMarket } from '@/lib/market';
 
 const TYPES: LeaveType[] = ['ANNUAL', 'SICK', 'EMERGENCY', 'STUDY', 'UNPAID'];
 type Row = LeaveRequest & { branchName: string };
@@ -17,6 +18,7 @@ const today = () => {
 };
 
 export default function LeavePage() {
+  const { market } = useMarket();
   const { branches, branchIds, branchId, loading: scopeLoading } = useScope();
   const { run, busy } = useAction();
   const [recording, setRecording] = useState(false);
@@ -121,7 +123,7 @@ export default function LeavePage() {
           </Select>
         </Field>
         <Field label="Staff name"><Input value={form.staffName} onChange={(e) => set('staffName', e.target.value)} /></Field>
-        <Field label="Role"><Input value={form.staffRole} onChange={(e) => set('staffRole', e.target.value)} placeholder="e.g. Pharmacist" /></Field>
+        <Field label="Role"><Input value={form.staffRole} onChange={(e) => set('staffRole', e.target.value)} placeholder={market.professions[0] ? `e.g. ${market.professions[0]}` : undefined} /></Field>
         <div className="grid grid-cols-2 gap-3">
           <Field label="Start date"><Input type="date" value={form.startDate} onChange={(e) => set('startDate', e.target.value)} /></Field>
           <Field label="End date" error={formError}><Input type="date" value={form.endDate} onChange={(e) => set('endDate', e.target.value)} /></Field>
@@ -145,7 +147,7 @@ export default function LeavePage() {
             </label>
             {backfill && (
               <>
-                <Field label="Hourly rate for vacancies (GBP)">
+                <Field label={`Hourly rate for vacancies (${market.currency})`}>
                   <Input type="number" min={1} max={1000} step="0.5" value={rate} onChange={(e) => setRate(e.target.value)} />
                 </Field>
                 <p className="text-xs text-slate-500">

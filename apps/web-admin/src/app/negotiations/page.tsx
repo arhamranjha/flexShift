@@ -1,7 +1,7 @@
 'use client';
 
 import type { Negotiation, NegotiationStatus } from '@flexshift/api-client';
-import { fmtRange, gbp, shiftHours, toNumber } from '@flexshift/api-client';
+import { currencySymbol, fmtRange, money, shiftHours, toNumber } from '@flexshift/api-client';
 import {
   Button, Card, EmptyState, ErrorBlock, Field, Input, LoadingBlock, Modal, StatusBadge, td, th, useAction, useAsync,
 } from '@flexshift/ui';
@@ -9,6 +9,7 @@ import clsx from 'clsx';
 import { useState } from 'react';
 import { Header } from '@/components/Header';
 import { api, useScope } from '@/lib/auth';
+import { useMarket } from '@/lib/market';
 
 const TABS: { key: NegotiationStatus | 'ALL'; label: string }[] = [
   { key: 'PENDING', label: 'Needs response' },
@@ -20,6 +21,8 @@ const TABS: { key: NegotiationStatus | 'ALL'; label: string }[] = [
 
 export default function NegotiationsPage() {
   const { branchId, branchIds, loading: scopeLoading } = useScope();
+  const { currency } = useMarket();
+  const curOf = (n: Negotiation | null | undefined) => n?.shift?.currency ?? currency;
   const [tab, setTab] = useState<NegotiationStatus | 'ALL'>('PENDING');
   const [active, setActive] = useState<Negotiation | null>(null);
   const [counter, setCounter] = useState('');
@@ -83,12 +86,12 @@ export default function NegotiationsPage() {
                         <div className="text-xs text-slate-500">{n.shift?.branch?.name}</div>
                       </td>
                       <td className={td}>{n.shift ? fmtRange(n.shift.startTime, n.shift.endTime) : ''}</td>
-                      <td className={td}>{n.shift ? gbp(n.shift.hourlyRate) : ''}/h</td>
+                      <td className={td}>{n.shift ? money(n.shift.hourlyRate, curOf(n)) : ''}/h</td>
                       <td className={td}>
-                        <span className="font-semibold">{gbp(n.proposedHourlyRate)}/h</span>
-                        {n.counterOfferRate && <div className="text-xs text-violet-700">Your counter: {gbp(n.counterOfferRate)}/h</div>}
+                        <span className="font-semibold">{money(n.proposedHourlyRate, curOf(n))}/h</span>
+                        {n.counterOfferRate && <div className="text-xs text-violet-700">Your counter: {money(n.counterOfferRate, curOf(n))}/h</div>}
                       </td>
-                      <td className={td}>{gbp(hours * rate(n))}</td>
+                      <td className={td}>{money(hours * rate(n), curOf(n))}</td>
                       <td className={td}><StatusBadge status={n.status} /></td>
                       <td className={td}>
                         <Button size="sm" variant={n.status === 'PENDING' ? 'primary' : 'secondary'} onClick={() => setActive(n)}>
@@ -136,21 +139,21 @@ export default function NegotiationsPage() {
             <div className="grid grid-cols-2 gap-3 text-sm">
               <div className="bg-slate-50 rounded-lg p-3">
                 <div className="text-xs text-slate-500">Advertised</div>
-                <div className="font-bold">{active.shift ? gbp(active.shift.hourlyRate) : ''}/h</div>
+                <div className="font-bold">{active.shift ? money(active.shift.hourlyRate, curOf(active)) : ''}/h</div>
               </div>
               <div className="bg-emerald-50 rounded-lg p-3">
                 <div className="text-xs text-emerald-700">Proposed</div>
-                <div className="font-bold text-emerald-900">{gbp(active.proposedHourlyRate)}/h</div>
+                <div className="font-bold text-emerald-900">{money(active.proposedHourlyRate, curOf(active))}/h</div>
               </div>
             </div>
             {active.message && <p className="text-sm bg-slate-50 rounded-lg p-3 text-slate-700">“{active.message}”</p>}
             {active.status === 'PENDING' && (
-              <Field label="Counter-offer rate (£/hour)" hint="Leave blank to accept or decline instead">
+              <Field label={`Counter-offer rate (${currencySymbol(curOf(active))}/hour)`} hint="Leave blank to accept or decline instead">
                 <Input type="number" min={1} max={1000} step="0.5" value={counter} onChange={(e) => setCounter(e.target.value)} />
               </Field>
             )}
             {active.status === 'COUNTERED' && (
-              <p className="text-sm text-violet-700">Your counter of {gbp(active.counterOfferRate)}/h is waiting for the worker to accept.</p>
+              <p className="text-sm text-violet-700">Your counter of {money(active.counterOfferRate, curOf(active))}/h is waiting for the worker to accept.</p>
             )}
           </>
         )}

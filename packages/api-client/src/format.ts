@@ -1,8 +1,16 @@
 import type { Money } from './types';
 
 export const toNumber = (m: Money | null | undefined) => Number(m ?? 0);
-export const gbp = (m: Money | null | undefined) =>
-  new Intl.NumberFormat('en-GB', { style: 'currency', currency: 'GBP' }).format(toNumber(m));
+/** Currency used when a record does not say (the platform's default market is New Zealand). */
+export const DEFAULT_CURRENCY = 'NZD';
+
+/** Amount in the given ISO currency, e.g. money(35, 'NZD') -> "$35.00", money(35, 'GBP') -> "£35.00". */
+export const money = (m: Money | null | undefined, currency: string = DEFAULT_CURRENCY) =>
+  new Intl.NumberFormat('en-NZ', { style: 'currency', currency }).format(toNumber(m));
+
+/** Just the symbol, for field labels such as "Hourly rate ($)". */
+export const currencySymbol = (currency: string = DEFAULT_CURRENCY) =>
+  new Intl.NumberFormat('en-NZ', { style: 'currency', currency }).formatToParts(0).find((p) => p.type === 'currency')?.value ?? currency;
 
 export const shiftHours = (start: string, end: string) => (new Date(end).getTime() - new Date(start).getTime()) / 3_600_000;
 

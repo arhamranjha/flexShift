@@ -1,28 +1,29 @@
 'use client';
 
-import { DOCUMENT_ACCEPT, documentFileProblem, normalizeDocumentFile, type ReliefProfile, type Shift, fmtRange, gbp } from '@flexshift/api-client';
+import { DOCUMENT_ACCEPT, documentFileProblem, normalizeDocumentFile, type ReliefProfile, type Shift, type DocType, ALL_DOC_TYPES, fmtRange, money } from '@flexshift/api-client';
 import {
   Badge, Button, Card, EmptyState, ErrorBlock, Field, Input, LoadingBlock, Modal, Select, StatusBadge, th, td, useAction, useAsync,
 } from '@flexshift/ui';
 import { Copy, Search, ShieldCheck, Upload, UserPlus } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { AddToStaffBankModal } from '@/components/AddToStaffBankModal';
-import { DOC_TYPES, ExpiryCell, MANDATORY_DOCS, MandatoryChecklist, docTypeLabel, expiryState, isValidDoc } from '@/components/DocHelpers';
+import { ExpiryCell, MandatoryChecklist, expiryState, isValidDoc } from '@/components/DocHelpers';
 import { Header } from '@/components/Header';
 import { useToast } from '@flexshift/ui';
 import { api } from '@/lib/auth';
+import { useMarket } from '@/lib/market';
 
 type WorkerDetail = ReliefProfile & { assignedShifts?: Shift[] };
 
-function docSummary(w: ReliefProfile) {
+function docSummary(w: ReliefProfile, mandatory: DocType[]) {
   const docs = w.documents;
   if (!docs) return <span className="text-slate-400">-</span>;
-  const valid = MANDATORY_DOCS.filter((t) => docs.some((d) => d.type === t && isValidDoc(d))).length;
+  const valid = mandatory.filter((t) => docs.some((d) => d.type === t && isValidDoc(d))).length;
   const pending = docs.filter((d) => d.status === 'PENDING').length;
   const expiring = docs.filter((d) => d.status === 'VERIFIED' && expiryState(d.expiresAt) === 'soon').length;
   return (
     <div className="flex flex-wrap gap-1">
-      <Badge tone={valid === MANDATORY_DOCS.length ? 'emerald' : 'amber'}>{valid}/{MANDATORY_DOCS.length} mandatory</Badge>
+      <Badge tone={valid === mandatory.length ? 'emerald' : 'amber'}>{valid}/{mandatory.length} mandatory</Badge>
       {pending > 0 && <Badge tone="sky">{pending} pending</Badge>}
       {expiring > 0 && <Badge tone="rose">{expiring} expiring</Badge>}
     </div>
@@ -39,6 +40,7 @@ const csv = (s: string) => s.split(',').map((x) => x.trim()).filter(Boolean);
 
 function OnboardModal({ open, onClose, onDone }: { open: boolean; onClose: () => void; onDone: () => void }) {
   const { run, busy } = useAction();
+  const { market, symbol } = useMarket();
   const toast = useToast();
   const [f, setF] = useState<Form>(emptyForm);
   const [errs, setErrs] = useState<Partial<Record<keyof Form, string>>>({});
@@ -66,7 +68,7 @@ function OnboardModal({ open, onClose, onDone }: { open: boolean; onClose: () =>
     if (!validate()) { toast.error('Please fix the highlighted fields.'); return; }
     const body: Record<string, unknown> = {
       email: f.email.trim(), firstName: f.firstName.trim(), lastName: f.lastName.trim(),
-      phone: f.phone.trim(), registrationNumber: f.registrationNumber.trim(),
+      phone: f.phone.trim(), registrationNumber: f.registrationNumber.trim(), country: market.code,
     };
     if (f.profession.trim()) body.profession = f.profession.trim();
     if (f.university.trim()) body.university = f.university.trim();
@@ -88,9 +90,9 @@ function OnboardModal({ open, onClose, onDone }: { open: boolean; onClose: () =>
     try { await navigator.clipboard.writeText(password?.value ?? ''); toast.success('Password copied'); } catch { toast.error('Could not copy; select the text manually.'); }
   };
 
-  const text = (k: keyof Form, lbl: string, extra: { type?: string; hint?: string; placeholder?: string } = {}) => (
+  const text = (k: keyof Form, lbl: string, extra: { type?: string; hint?: string; placeholder?: string; list?: string } = {}) => (
     <Field label={lbl} error={errs[k]} hint={extra.hint}>
-      <Input type={extra.type ?? 'text'} value={f[k]} onChange={set(k)} placeholder={extra.placeholder} />
+      <Input type={extra.type ?? 'text'} value={f[k]} onChange={set(k)} placeholder={extra.placeholder} list={extra.list} />
     </Field>
   );
 
@@ -107,11 +109,12 @@ function OnboardModal({ open, onClose, onDone }: { open: boolean; onClose: () =>
           {text('firstName', 'First name')}
           {text('lastName', 'Last name')}
           {text('email', 'Email', { type: 'email' })}
-          {text('phone', 'Phone')}
-          {text('registrationNumber', 'Registration number')}
-          {text('profession', 'Profession', { hint: 'Optional' })}
-          {text('hourlyRate', 'Hourly rate (£)', { type: 'number' })}
-          {text('minimumShiftRate', 'Minimum shift rate (£)', { type: 'number' })}
+          {text('phone', 'Phone', { placeholder: market.phoneExample })}
+          {text('registrationNumber', 'Registration number', { hint: market.registrationBody })}
+          {text('profession', 'Profession', { hint: 'Optional', list: 'market-professions', placeholder: market.professions[0] })}
+          <datalist id="market-professions">{market.professions.map((p) => <option key={p} value={p} />)}</datalist>
+          {text('hourlyRate', `Hourly rate (${symbol})`, { type: 'number' })}
+          {text('minimumShiftRate', `Minimum shift rate (${symbol})`, { type: 'number' })}
           {text('university', 'University')}
           {text('graduationYear', 'Graduation year', { type: 'number' })}
           {text('yearsCommunityExperience', 'Years community experience', { type: 'number' })}
@@ -142,6 +145,7 @@ function OnboardModal({ open, onClose, onDone }: { open: boolean; onClose: () =>
 /* ---------- Upload ---------- */
 function UploadModal({ worker, onClose, onDone }: { worker: ReliefProfile | null; onClose: () => void; onDone: () => void }) {
   const { run, busy } = useAction();
+  const { docLabel } = useMarket();
   const [type, setType] = useState('IDENTITY');
   const [ref, setRef] = useState('');
   const [issue, setIssue] = useState('');
@@ -176,7 +180,7 @@ function UploadModal({ worker, onClose, onDone }: { worker: ReliefProfile | null
       footer={(<><Button variant="secondary" onClick={onClose}>Cancel</Button><Button onClick={submit} loading={busy}>Upload</Button></>)}
     >
       <Field label="Document type">
-        <Select value={type} onChange={(e) => setType(e.target.value)}>{DOC_TYPES.map((t) => <option key={t} value={t}>{docTypeLabel(t)}</option>)}</Select>
+        <Select value={type} onChange={(e) => setType(e.target.value)}>{ALL_DOC_TYPES.map((t) => <option key={t} value={t}>{docLabel(t)}</option>)}</Select>
       </Field>
       <Field label="Reference"><Input value={ref} onChange={(e) => setRef(e.target.value)} /></Field>
       <div className="grid grid-cols-2 gap-3">
@@ -199,6 +203,7 @@ function DetailModal({
   // Re-fetch after the parent finishes an upload (parent bumps nothing; reload on focus of modal open is enough).
   useEffect(() => { const h = () => reload(); window.addEventListener('worker-docs-changed', h); return () => window.removeEventListener('worker-docs-changed', h); }, [reload]);
   const w = data;
+  const { docLabel, currency } = useMarket();
   return (
     <Modal
       open={!!workerId}
@@ -219,7 +224,7 @@ function DetailModal({
             <div><p className="text-xs text-slate-500">Registration</p>{w.registrationNumber}</div>
             <div><p className="text-xs text-slate-500">Email</p>{w.user?.email ?? '-'}</div>
             <div><p className="text-xs text-slate-500">Phone</p>{w.phone ?? '-'}</div>
-            <div><p className="text-xs text-slate-500">Standard rate</p>{w.hourlyRate != null ? `${gbp(w.hourlyRate)}/hr` : '-'}</div>
+            <div><p className="text-xs text-slate-500">Standard rate</p>{w.hourlyRate != null ? `${money(w.hourlyRate, currency)}/hr` : '-'}</div>
             <div><p className="text-xs text-slate-500">Verification</p>{w.isVerified ? <Badge tone="emerald">Verified</Badge> : <Badge tone="amber">Not verified</Badge>}</div>
           </div>
           <div className="flex flex-wrap gap-1">
@@ -238,7 +243,7 @@ function DetailModal({
                   <tbody>
                     {w.documents.map((d) => (
                       <tr key={d.id}>
-                        <td className={td}>{docTypeLabel(d.type)}</td>
+                        <td className={td}>{docLabel(d.type)}</td>
                         <td className={td}>{d.documentReference || '-'}</td>
                         <td className={td}><StatusBadge status={d.status} /></td>
                         <td className={td}><ExpiryCell iso={d.expiresAt} /></td>
@@ -280,6 +285,7 @@ function DetailModal({
 
 /* ---------- Page ---------- */
 export default function WorkersPage() {
+  const { mandatory } = useMarket();
   const [search, setSearch] = useState('');
   const [q, setQ] = useState('');
   const [verified, setVerified] = useState('');
@@ -356,7 +362,7 @@ export default function WorkersPage() {
                           </div>
                         </td>
                         <td className={td}>{w.isVerified ? <Badge tone="emerald"><ShieldCheck className="w-3 h-3 mr-1" />Verified</Badge> : <Badge tone="amber">Unverified</Badge>}</td>
-                        <td className={td}>{docSummary(w)}</td>
+                        <td className={td}>{docSummary(w, mandatory)}</td>
                         <td className={td}>{mems.length ? <Badge tone="emerald">{mems.length} membership{mems.length > 1 ? 's' : ''}</Badge> : <span className="text-slate-400">No</span>}</td>
                       </tr>
                     );

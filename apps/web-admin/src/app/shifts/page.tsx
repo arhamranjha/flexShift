@@ -1,6 +1,6 @@
 'use client';
 
-import { fmtRange, gbp, titleCase, type Shift, type ShiftStatus, type ShiftVisibility } from '@flexshift/api-client';
+import { fmtRange, money, titleCase, type Shift, type ShiftStatus, type ShiftVisibility } from '@flexshift/api-client';
 import { Badge, Button, Card, EmptyState, ErrorBlock, Field, Input, LoadingBlock, Modal, Select, StatusBadge, td, Textarea, th, useAction, useAsync } from '@flexshift/ui';
 import { Plus } from 'lucide-react';
 import { useState } from 'react';
@@ -8,12 +8,14 @@ import { Header } from '@/components/Header';
 import { ShiftDetailModal } from '@/components/ShiftDetailModal';
 import { ShiftFormModal } from '@/components/ShiftFormModal';
 import { api, useScope } from '@/lib/auth';
+import { useMarket } from '@/lib/market';
 
 const STATUSES: ShiftStatus[] = ['DRAFT', 'OPEN', 'IN_NEGOTIATION', 'BOOKED', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED'];
 const VISIBILITIES: ShiftVisibility[] = ['STAFF_BANK_ONLY', 'PUBLIC_MARKETPLACE', 'EMERGENCY_BROADCAST'];
 
 export default function ShiftsPage() {
   const { branchId, branchIds, loading: scopeLoading } = useScope();
+  const { currency } = useMarket();
   const { run, busy } = useAction();
   const [status, setStatus] = useState<ShiftStatus | ''>('');
   const [from, setFrom] = useState('');
@@ -95,7 +97,7 @@ export default function ShiftsPage() {
                       </td>
                       <td className={`${td} max-w-[9rem]`}>{s.branch?.name}</td>
                       <td className={`${td} whitespace-nowrap`}>{fmtRange(s.startTime, s.endTime)}</td>
-                      <td className={td}>{gbp(s.hourlyRate)}/h</td>
+                      <td className={td}>{money(s.hourlyRate, s.currency ?? currency)}/h</td>
                       <td className={td}>
                         {editable && s.status !== 'BOOKED' && s.status !== 'IN_PROGRESS' ? (
                           <Select

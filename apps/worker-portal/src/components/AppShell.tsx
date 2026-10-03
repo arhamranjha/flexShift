@@ -35,7 +35,8 @@ export function AppShell({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (loading) return;
     if (!user && !isPublic) router.replace('/login');
-    else if (user && isPublic) router.replace('/feed');
+    // /register navigates itself (to the profile, with the documents banner) once the account exists.
+    else if (user && isPublic && pathname !== '/register') router.replace('/feed');
     else if (user?.mustChangePassword && pathname !== '/change-password') router.replace('/change-password');
   }, [loading, user, isPublic, pathname, router]);
 

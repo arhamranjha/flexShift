@@ -1,9 +1,10 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { Role } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AccessService, AuthUser } from '../common/access.service';
 import { marketFor } from '../common/markets';
-import { CreateOrganizationDto, UpdateOrganizationDto } from './dto/organization.dto';
+import { CreateOrganizationDto, OnboardOrganizationDto, UpdateOrganizationDto } from './dto/organization.dto';
+import { createOrganization } from './onboarding';
 
 @Injectable()
 export class OrganizationsService {
@@ -17,6 +18,7 @@ export class OrganizationsService {
       where: user.role === Role.SUPER_ADMIN ? {} : { id: user.organizationId ?? '' },
       include: {
         branches: true,
+        users: { where: { role: Role.ORG_ADMIN }, select: { id: true, email: true, isActive: true, mustChangePassword: true, lastLoginAt: true } },
         _count: { select: { branches: true, staffBankMembers: true, users: true } },
       },
     });
@@ -33,6 +35,16 @@ export class OrganizationsService {
     });
     if (!org) throw new NotFoundException('Organization not found');
     return org;
+  }
+
+  async onboard(input: OnboardOrganizationDto) {
+    try {
+      return await createOrganization(this.prisma, input);
+    } catch (e) {
+      // The onboarding core checks everything up front and explains problems in plain words.
+      if (e instanceof Error && !(e as { code?: string }).code) throw new BadRequestException(e.message);
+      throw e;
+    }
   }
 
   create(data: CreateOrganizationDto) {

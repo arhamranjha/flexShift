@@ -1,13 +1,12 @@
 'use client';
 
-import { gbp, shiftHours, type MarketRates, type Shift, type ShiftVisibility } from '@flexshift/api-client';
+import { currencySymbol, money, shiftHours, type MarketRates, type Shift, type ShiftVisibility } from '@flexshift/api-client';
 import { Button, Field, Input, Modal, Select, Textarea, useAction } from '@flexshift/ui';
 import { X } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { api, useScope } from '@/lib/auth';
+import { useMarket } from '@/lib/market';
 
-const SYSTEM_SUGGESTIONS = ['ProScript', 'Columbus', 'Nexphase'];
-const ACCREDITATION_SUGGESTIONS = ['CPCS', 'Flu Vaccination', 'Safeguarding Level 3', 'NMS', 'Independent Prescriber'];
 
 /** Convert an ISO string to the `datetime-local` input format in local time. */
 const toLocalInput = (iso: string) => {
@@ -79,12 +78,14 @@ interface Props {
 export function ShiftFormModal({ open, onClose, onSaved, shift, defaultBranchId }: Props) {
   const { branches, branchId: scopeBranch } = useScope();
   const { run, busy } = useAction();
+  const mkt = useMarket();
+  const defaultRole = mkt.market.professions[0] ?? '';
   const editing = !!shift;
   const locked = shift?.status === 'BOOKED' || shift?.status === 'IN_PROGRESS';
 
   const [branchId, setBranchId] = useState('');
   const [title, setTitle] = useState('');
-  const [role, setRole] = useState('Pharmacist');
+  const [role, setRole] = useState('');
   const [start, setStart] = useState('');
   const [end, setEnd] = useState('');
   const [rate, setRate] = useState('');
@@ -119,7 +120,7 @@ export function ShiftFormModal({ open, onClose, onSaved, shift, defaultBranchId 
     } else {
       setBranchId(defaultBranchId || scopeBranch || branches[0]?.id || '');
       setTitle('');
-      setRole('Pharmacist');
+      setRole(defaultRole);
       setStart('');
       setEnd('');
       setRate('');
@@ -133,6 +134,13 @@ export function ShiftFormModal({ open, onClose, onSaved, shift, defaultBranchId 
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, shift]);
+
+  // The market list may arrive after the form opens: fill the default role if still empty.
+  useEffect(() => {
+    if (open && !shift) setRole((r) => r || defaultRole);
+  }, [open, shift, defaultRole]);
+
+  const cur = shift?.currency ?? mkt.currency;
 
   // Anonymised platform benchmark for the chosen role, shown as a hint under the rate field.
   useEffect(() => {
@@ -158,7 +166,7 @@ export function ShiftFormModal({ open, onClose, onSaved, shift, defaultBranchId 
       if (endD! <= startD!) return 'End time must be after the start time.';
       if (!editing && startD! <= new Date()) return 'Start time must be in the future.';
       if (!(rateN > 0)) return 'Hourly rate must be greater than zero.';
-      if (rateN < 1 || rateN > 1000) return 'Hourly rate must be between £1 and £1,000.';
+      if (rateN < 1 || rateN > 1000) return `Hourly rate must be between ${currencySymbol(cur)}1 and ${currencySymbol(cur)}1,000.`;
       if (!role.trim()) return 'Role required cannot be empty.';
     }
     return '';
@@ -243,8 +251,8 @@ export function ShiftFormModal({ open, onClose, onSaved, shift, defaultBranchId 
           <Input type="datetime-local" value={end} disabled={dis} onChange={(e) => setEnd(e.target.value)} />
         </Field>
         <Field
-        label="Hourly rate (£)"
-        hint={market && market.median != null ? `Market rate for ${market.profession}s (last 90 days): median ${gbp(market.median)}, middle half ${gbp(market.p25)}–${gbp(market.p75)}` : undefined}
+        label={`Hourly rate (${currencySymbol(cur)})`}
+        hint={market && market.median != null ? `Market rate for ${market.profession}s (last 90 days): median ${money(market.median, cur)}, middle half ${money(market.p25, cur)}–${money(market.p75, cur)}` : undefined}
       >
           <Input type="number" min={1} max={1000} step="0.5" value={rate} disabled={dis} onChange={(e) => setRate(e.target.value)} />
         </Field>
@@ -252,14 +260,14 @@ export function ShiftFormModal({ open, onClose, onSaved, shift, defaultBranchId 
 
       <div className="rounded-lg bg-slate-50 border border-slate-200 px-3 py-2 text-sm flex justify-between">
         <span className="text-slate-600">{hours > 0 ? `${hours.toFixed(1)} hours` : 'Enter times to calculate'}</span>
-        <span className="font-bold text-slate-900">Estimated pay {gbp(total)}</span>
+        <span className="font-bold text-slate-900">Estimated pay {money(total, cur)}</span>
       </div>
 
       <Field label="Required systems" hint="Type and press Enter or comma, or pick a suggestion.">
-        <TagsInput value={systems} onChange={setSystems} suggestions={SYSTEM_SUGGESTIONS} placeholder="Add a system" disabled={dis} />
+        <TagsInput value={systems} onChange={setSystems} suggestions={mkt.market.systems} placeholder="Add a system" disabled={dis} />
       </Field>
       <Field label="Required accreditations">
-        <TagsInput value={accreds} onChange={setAccreds} suggestions={ACCREDITATION_SUGGESTIONS} placeholder="Add an accreditation" disabled={dis} />
+        <TagsInput value={accreds} onChange={setAccreds} suggestions={mkt.market.accreditations} placeholder="Add an accreditation" disabled={dis} />
       </Field>
 
       <Field label="Visibility">

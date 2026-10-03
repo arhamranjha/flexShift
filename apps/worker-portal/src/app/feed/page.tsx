@@ -1,6 +1,7 @@
 'use client';
 
 import { Button, EmptyState, ErrorBlock, Field, Input, LoadingBlock, Modal, useAsync, useToast } from '@flexshift/ui';
+import { useMarket } from '@/lib/market';
 import { api } from '@/lib/auth';
 import type { Shift } from '@flexshift/api-client';
 import clsx from 'clsx';
@@ -18,6 +19,7 @@ const TABS = [
 
 export default function FeedPage() {
   const toast = useToast();
+  const { symbol } = useMarket();
   const [tab, setTab] = useState<(typeof TABS)[number]['id']>('for_you');
   const [filters, setFilters] = useState({ minRate: '', from: '', to: '' });
   const [draft, setDraft] = useState(filters);
@@ -103,7 +105,7 @@ export default function FeedPage() {
           <Button className="min-h-[44px]" disabled={!!rangeBad} onClick={() => { setFilters(draft); setSheet(false); }}>Apply</Button>
         </>}
       >
-        <Field label="Minimum hourly rate (£)" hint="Defaults to your profile minimum when empty">
+        <Field label={`Minimum hourly rate (${symbol})`} hint="Defaults to your profile minimum when empty">
           <Input type="number" inputMode="decimal" min={0} className="min-h-[44px] text-base" value={draft.minRate} onChange={(e) => setDraft({ ...draft, minRate: e.target.value })} />
         </Field>
         <div className="grid grid-cols-2 gap-3">

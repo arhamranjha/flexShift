@@ -7,9 +7,10 @@ import {
 import { CheckCircle2, ExternalLink, XCircle } from 'lucide-react';
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
-import { ExpiryCell, MandatoryChecklist, docTypeLabel, expiryState, fmtLong } from '@/components/DocHelpers';
+import { ExpiryCell, MandatoryChecklist, expiryState, fmtLong } from '@/components/DocHelpers';
 import { Header } from '@/components/Header';
 import { api } from '@/lib/auth';
+import { useMarket } from '@/lib/market';
 
 const TABS: { key: DocStatus; label: string }[] = [
   { key: 'PENDING', label: 'Pending' },
@@ -46,6 +47,7 @@ function Preview({ docId }: { docId: string }) {
 
 function ReviewModal({ doc, onClose, onDone }: { doc: ComplianceDocument | null; onClose: () => void; onDone: () => void }) {
   const { run, busy } = useAction();
+  const { docLabel } = useMarket();
   const [notes, setNotes] = useState('');
   useEffect(() => setNotes(doc?.verificationNotes ?? ''), [doc]);
   const worker = useAsync(() => (doc ? api.workers.get(doc.reliefWorkerId) : Promise.resolve(undefined)), [doc?.id]);
@@ -63,7 +65,7 @@ function ReviewModal({ doc, onClose, onDone }: { doc: ComplianceDocument | null;
       open={!!doc}
       onClose={onClose}
       wide
-      title={doc ? `${docTypeLabel(doc.type)} review` : 'Review'}
+      title={doc ? `${docLabel(doc.type)} review` : 'Review'}
       footer={doc && (
         <>
           <Button variant="secondary" onClick={onClose}>Close</Button>
@@ -103,6 +105,7 @@ function ReviewModal({ doc, onClose, onDone }: { doc: ComplianceDocument | null;
 export default function CompliancePage() {
   const [tab, setTab] = useState<DocStatus>('PENDING');
   const [reviewing, setReviewing] = useState<ComplianceDocument | null>(null);
+  const { docLabel } = useMarket();
   const { data, error, loading, reload } = useAsync(() => api.workers.documentQueue(tab), [tab]);
 
   return (
@@ -131,7 +134,7 @@ export default function CompliancePage() {
                         <p className="font-semibold text-slate-900">{d.reliefWorker ? `${d.reliefWorker.firstName} ${d.reliefWorker.lastName}` : '-'}</p>
                         <p className="text-xs text-slate-500">{d.reliefWorker?.profession}</p>
                       </td>
-                      <td className={td}>{docTypeLabel(d.type)}</td>
+                      <td className={td}>{docLabel(d.type)}</td>
                       <td className={td}>{d.documentReference || '-'}</td>
                       <td className={td}>{fmtLong(d.issueDate)}</td>
                       <td className={td}><ExpiryCell iso={d.expiresAt} /></td>

@@ -1,27 +1,35 @@
 'use client';
 
-import { Button, Field, Input, useAction } from '@flexshift/ui';
+import { Button, Field, Input, Select, useAction } from '@flexshift/ui';
+import { currencySymbol, findMarket } from '@flexshift/api-client';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import { Logo } from '@/components/AppShell';
-import { ACCREDITATIONS, Chips, SYSTEMS } from '@/components/common';
+import { Chips } from '@/components/common';
 import { useAuth, type RegisterBody } from '@/lib/auth';
+import { FALLBACK_MARKET, useMarket } from '@/lib/market';
 
 const num = (v: string) => (v.trim() === '' ? undefined : Number(v));
 
 export default function RegisterPage() {
   const { register } = useAuth();
+  const { markets } = useMarket();
   const router = useRouter();
   const { run, busy } = useAction();
   const [step, setStep] = useState<1 | 2>(1);
   const [f, setF] = useState({
     email: '', password: '', firstName: '', lastName: '', phone: '',
-    registrationNumber: '', profession: 'Pharmacist', hourlyRate: '', minimumShiftRate: '',
+    registrationNumber: '', profession: '', country: '', hourlyRate: '', minimumShiftRate: '',
   });
   const [systems, setSystems] = useState<string[]>([]);
   const [accr, setAccr] = useState<string[]>([]);
+  const [professionEdited, setProfessionEdited] = useState(false);
   const set = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement>) => setF({ ...f, [k]: e.target.value });
+  const market = findMarket(markets, f.country || undefined) ?? FALLBACK_MARKET;
+  const symbol = currencySymbol(market.currency);
+  // Until the worker types their own, the profession follows the country's first suggestion.
+  const profession = f.profession === '' && !professionEdited ? market.professions[0] ?? '' : f.profession;
 
   const phoneOk = f.phone.trim().length >= 5 && f.phone.trim().length <= 25;
   const step1Ok = f.email.includes('@') && f.password.length >= 8 && f.firstName.trim() && f.lastName.trim() && phoneOk;
@@ -36,7 +44,8 @@ export default function RegisterPage() {
     const body: RegisterBody = {
       email: f.email.trim(), password: f.password, firstName: f.firstName.trim(), lastName: f.lastName.trim(),
       phone: f.phone.trim(), registrationNumber: f.registrationNumber.trim(),
-      ...(f.profession.trim() && { profession: f.profession.trim() }),
+      country: market.code,
+      ...(profession.trim() && { profession: profession.trim() }),
       ...(num(f.hourlyRate) !== undefined && { hourlyRate: num(f.hourlyRate) }),
       ...(num(f.minimumShiftRate) !== undefined && { minimumShiftRate: num(f.minimumShiftRate) }),
       systemTags: systems,
@@ -64,28 +73,33 @@ export default function RegisterPage() {
               <Field label="Last name"><Input required maxLength={60} className={big} value={f.lastName} onChange={set('lastName')} /></Field>
             </div>
             <Field label="Email"><Input type="email" required autoComplete="email" className={big} value={f.email} onChange={set('email')} /></Field>
-            <Field label="Phone" hint="5 to 25 characters" error={f.phone && !phoneOk ? 'Enter a valid phone number' : undefined}>
-              <Input type="tel" required autoComplete="tel" className={big} value={f.phone} onChange={set('phone')} />
+            <Field label="Country">
+              <Select className={big} value={market.code} onChange={(e) => setF({ ...f, country: e.target.value })}>
+                {(markets?.markets ?? [market]).map((m) => <option key={m.code} value={m.code}>{m.name}</option>)}
+              </Select>
+            </Field>
+            <Field label="Phone" hint={market.phoneExample ? `e.g. ${market.phoneExample}` : '5 to 25 characters'} error={f.phone && !phoneOk ? 'Enter a valid phone number' : undefined}>
+              <Input type="tel" required autoComplete="tel" placeholder={market.phoneExample} className={big} value={f.phone} onChange={set('phone')} />
             </Field>
             <Field label="Password" hint="At least 8 characters"><Input type="password" required minLength={8} maxLength={128} autoComplete="new-password" className={big} value={f.password} onChange={set('password')} /></Field>
             <Button type="submit" disabled={!step1Ok} className="w-full min-h-[44px] text-base">Continue</Button>
           </>
         ) : (
           <>
-            <Field label="Registration number" hint="e.g. your GPhC number" error={f.registrationNumber && (regLen < 3 || regLen > 30) ? 'Must be 3 to 30 characters' : undefined}>
+            <Field label="Registration number" hint={`e.g. your ${market.registrationBody} number`} error={f.registrationNumber && (regLen < 3 || regLen > 30) ? 'Must be 3 to 30 characters' : undefined}>
               <Input required className={big} value={f.registrationNumber} onChange={set('registrationNumber')} />
             </Field>
-            <Field label="Profession"><Input maxLength={60} className={big} value={f.profession} onChange={set('profession')} /></Field>
+            <Field label="Profession"><Input maxLength={60} className={big} value={profession} onChange={(e) => { setProfessionEdited(true); setF({ ...f, profession: e.target.value }); }} /></Field>
             <div className="grid grid-cols-2 gap-3">
-              <Field label="Hourly rate (£)" error={rateBad(f.hourlyRate) ? '0 to 1000' : undefined}>
+              <Field label={`Hourly rate (${symbol})`} error={rateBad(f.hourlyRate) ? '0 to 1000' : undefined}>
                 <Input type="number" inputMode="decimal" min={0} max={1000} step="0.5" className={big} value={f.hourlyRate} onChange={set('hourlyRate')} />
               </Field>
-              <Field label="Minimum shift rate (£)" error={rateBad(f.minimumShiftRate) ? '0 to 1000' : undefined}>
+              <Field label={`Minimum shift rate (${symbol})`} error={rateBad(f.minimumShiftRate) ? '0 to 1000' : undefined}>
                 <Input type="number" inputMode="decimal" min={0} max={1000} step="0.5" className={big} value={f.minimumShiftRate} onChange={set('minimumShiftRate')} />
               </Field>
             </div>
-            <div><p className="text-xs font-semibold text-slate-700 mb-2">Systems you use</p><Chips options={SYSTEMS} value={systems} onChange={setSystems} /></div>
-            <div><p className="text-xs font-semibold text-slate-700 mb-2">Accreditations</p><Chips options={ACCREDITATIONS} value={accr} onChange={setAccr} /></div>
+            <div><p className="text-xs font-semibold text-slate-700 mb-2">Systems you use</p><Chips options={Array.from(new Set([...market.systems, ...systems]))} value={systems} onChange={setSystems} /></div>
+            <div><p className="text-xs font-semibold text-slate-700 mb-2">Accreditations</p><Chips options={Array.from(new Set([...market.accreditations, ...accr]))} value={accr} onChange={setAccr} /></div>
             <div className="flex gap-3">
               <Button type="button" variant="secondary" className="min-h-[44px] text-base" onClick={() => setStep(1)}>Back</Button>
               <Button type="submit" loading={busy} disabled={!step2Ok} className="flex-1 min-h-[44px] text-base">Create account</Button>

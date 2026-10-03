@@ -56,7 +56,7 @@ async function firstLogin(page, email, temp) {
   await page.getByRole('button', { name: 'Sign in' }).click();
   await page.waitForURL('**/change-password', { timeout: 15000 });
   await page.getByLabel('Current password').fill(temp);
-  await page.getByLabel('New password', { exact: true }).fill(NEW_PW);
+  await page.getByLabel(/^New password/).fill(NEW_PW);
   await page.getByLabel('Confirm new password').fill(NEW_PW);
   await page.getByRole('button', { name: 'Update password' }).click();
   await page.waitForURL(APP + '/', { timeout: 15000 });

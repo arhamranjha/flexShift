@@ -1,12 +1,13 @@
 'use client';
 
-import { fmtDate, gbp, toNumber, type Invoice, type InvoiceStatus } from '@flexshift/api-client';
+import { fmtDate, money, toNumber, type Invoice, type InvoiceStatus } from '@flexshift/api-client';
 import { Badge, Button, Card, EmptyState, ErrorBlock, Field, Input, LoadingBlock, Modal, StatusBadge, td, th, useAction, useAsync, useToast } from '@flexshift/ui';
 import clsx from 'clsx';
 import { Download, Printer } from 'lucide-react';
 import { useState } from 'react';
 import { Header } from '@/components/Header';
 import { api, useAuth, useScope } from '@/lib/auth';
+import { useMarket } from '@/lib/market';
 
 type Tab = 'ALL' | 'ISSUED' | 'PAID';
 const TABS: { key: Tab; label: string }[] = [
@@ -33,6 +34,7 @@ export default function InvoicesPage() {
 
 function InvoicesView() {
   const { orgId, branches } = useScope();
+  const { currency } = useMarket();
   const toast = useToast();
   const { run, busy } = useAction();
   const [tab, setTab] = useState<Tab>('ALL');
@@ -93,8 +95,8 @@ function InvoicesView() {
       <main className="p-8 space-y-6">
         <div className="grid gap-4 sm:grid-cols-3">
           {[
-            { l: 'Outstanding (issued)', v: gbp(outstanding) },
-            { l: 'Paid this month', v: gbp(paidMonth) },
+            { l: 'Outstanding (issued)', v: money(outstanding, currency) },
+            { l: 'Paid this month', v: money(paidMonth, currency) },
             { l: 'Overdue invoices', v: String(overdue), warn: overdue > 0 },
           ].map((c) => (
             <Card key={c.l} className="p-5">
@@ -128,7 +130,7 @@ function InvoicesView() {
                       </td>
                       <td className={td}>{workerName(i)}</td>
                       <td className={td}>{branchOf(i)}</td>
-                      <td className={clsx(td, 'font-semibold')}>{gbp(i.totalAmount)}</td>
+                      <td className={clsx(td, 'font-semibold')}>{money(i.totalAmount, i.currency ?? currency)}</td>
                       <td className={td}>{fmtDate(i.issuedAt)}</td>
                       <td className={td}>{i.dueAt ? fmtDate(i.dueAt) : '-'} {isOverdue(i) && <Badge tone="rose">Overdue</Badge>}</td>
                       <td className={td}><StatusBadge status={i.status} /></td>
@@ -147,7 +149,7 @@ function InvoicesView() {
         footer={<><Button variant="secondary" onClick={() => setPayFor(null)}>Cancel</Button><Button loading={busy} disabled={!refValid} onClick={pay}>Mark paid</Button></>}>
         {payFor && (
           <>
-            <p className="text-sm text-slate-700">{payFor.invoiceNumber} · {workerName(payFor)} · <span className="font-bold">{gbp(payFor.totalAmount)}</span></p>
+            <p className="text-sm text-slate-700">{payFor.invoiceNumber} · {workerName(payFor)} · <span className="font-bold">{money(payFor.totalAmount, payFor.currency ?? currency)}</span></p>
             <Field label="Payment reference" hint="3 to 100 characters, e.g. bank transfer reference" error={ref && !refValid ? 'Reference must be 3 to 100 characters' : undefined}>
               <Input value={ref} maxLength={100} onChange={(e) => setRef(e.target.value)} autoFocus />
             </Field>
@@ -177,12 +179,12 @@ function InvoicesView() {
                 <tbody><tr>
                   <td className={td}>{view.timesheet.shift?.title ?? 'Shift'}{view.timesheet.shift && <div className="text-xs text-slate-500">{fmtDate(view.timesheet.shift.startTime)} · {branchOf(view)}</div>}</td>
                   <td className={td}>{toNumber(view.timesheet.billableHours).toFixed(2)}</td>
-                  <td className={td}>{gbp(view.timesheet.hourlyRateApplied)}/h</td>
-                  <td className={td}>{gbp(view.timesheet.totalPayout)}</td>
+                  <td className={td}>{money(view.timesheet.hourlyRateApplied, view.currency ?? currency)}/h</td>
+                  <td className={td}>{money(view.timesheet.totalPayout, view.currency ?? currency)}</td>
                 </tr></tbody>
               </table>
             )}
-            <p className="text-right text-lg font-bold">Total {gbp(view.totalAmount)}</p>
+            <p className="text-right text-lg font-bold">Total {money(view.totalAmount, view.currency ?? currency)}</p>
             {view.status === 'PAID' && <p className="text-slate-600">Paid {view.paidAt ? fmtDate(view.paidAt) : ''}{view.paymentReference ? ` · Ref ${view.paymentReference}` : ''}</p>}
           </div>
         )}
