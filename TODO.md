@@ -23,7 +23,7 @@ Legend: [x] done · [~] partly done · [ ] not started
 - [x] Leave conflict detection (same person cannot hold overlapping pending/approved leave at a branch)
 - [x] Operator (platform) verification of self-registered workers: platform queue in the Compliance Desk for super admins, notification on upload, worker told who reviews (DECISIONS 2.6)
 - [x] Worker-initiated "share my documents with this organization" request: by organization code or from a shift page; organization reviews in the Compliance Desk and accepts into its staff bank or declines (DECISIONS 2.6)
-- [ ] Per-organization document *verification* (today any in-scope organization can verify a worker's documents; verified status is global). With document sharing a worker can choose who verifies them; cheap interim options from the PR #4 review: show booking organizations which organization verified each document, or require operator verification for the identity document (owner decision)
+- [ ] **Decision pending (owner with stakeholders/BA):** who may verify a worker's documents. Verified status is global today and, with document sharing, the worker chooses which organization verifies them. Options (status quo, show the verifying organization, operator-only identity check, per-organization verification) and their costs are in DECISIONS 7.1
 - [ ] Organization codes can be probed through the share endpoint (unknown code 404 vs known 201/409); needs a worker account and is throttled, so accepted for now
 - [ ] `isVerified` only reflects the four base documents; NZ workers without a practising certificate still show as verified (bookability is enforced separately)
 - [ ] HEIC photos (iPhone default) are not accepted for document upload
@@ -34,7 +34,7 @@ Legend: [x] done · [~] partly done · [ ] not started
 
 ## Markets (NZ first)
 - [x] Markets as data: NZ (default) and GB; currency, timezone, tax, credentials and wording per market; shifts and invoices carry their currency
-- [ ] Confirm the NZ defaults with a pharmacy customer (regulator wording, police-vetting requirements, dispensing-system names, accreditations) and edit `common/markets.ts`
+- [ ] Confirm the NZ defaults with a pharmacy customer (regulator wording, police-vetting requirements, dispensing-system names, accreditations) and edit `common/markets.ts` (questions ready: `docs/NZ_PHARMACY_QUESTIONS.md`)
 - [ ] NZ privacy review before real worker documents are stored (Privacy Act 2020, IPP 12 for offshore hosting)
 - [ ] Per-currency totals are shown wherever amounts are summed; a reporting view per currency (and exchange handling) is not built
 - [ ] GST: invoices show no tax today; most contractors are probably not GST-registered, so the export defaults to "No GST"

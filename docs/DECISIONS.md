@@ -216,3 +216,25 @@ production rehearsal down removed the dev Postgres container (the data volume su
 ### 6.5 Operational scripts take no secrets on the command line
 `create-admin.sh` reads the password silently and sends it over SSH stdin. `init-env.sh` generates strong secrets locally into `deploy/.env`
 (gitignored); `push.sh` sends it once and never overwrites the server's copy (changing the DB password or JWT secret would break the system).
+
+---
+
+## 7. Open decisions (not yet made)
+
+Recorded so nobody builds one of these by default. When one is decided, move it into the right section above as a normal entry.
+
+### 7.1 Who may verify a worker's documents (pending: owner with stakeholders / BA, raised in the PR #4 review, 2026-10-03)
+**Today:** a document's `VERIFIED` status is global. Any organization that has the worker in scope can verify it, and that verification
+counts at every other organization. Since document sharing (2.6) a worker can bring any organization into scope, by its id or a guessable code,
+so the worker effectively chooses who verifies them, and one careless organization admin becomes a platform-wide trust problem.
+**Options:**
+1. *Leave it global* (status quo). No work. The trust problem stays; acceptable only while every organization on the platform is onboarded and known.
+2. *Show booking organizations which organization verified each document* (for example "Identity verified by Kiwi Care Pharmacies"), so each
+   organization can decide whether it trusts that. Small change. Cost: it tells one organization about the worker's dealings with another
+   (privacy; also hidden today on purpose, see 2.6).
+3. *Operator-only for the identity document* (or for all four base documents): organizations may review but only the platform operator's
+   verification counts for identity. Small to medium change. Cost: the operator becomes a bottleneck again (the reason 2.6 path (2) exists).
+4. *Per-organization verification*: each organization verifies for itself and the eligibility gate checks the booking organization's own
+   verification (TODO.md). Largest change (schema, eligibility, both UIs). Cost: workers are re-checked by every organization they work for,
+   which is how many agencies already work.
+Options 2 and 3 are cheap stopgaps that can be combined; 4 is the long-term answer. Nothing is built until this is decided.
