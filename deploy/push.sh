@@ -26,6 +26,7 @@ set -euo pipefail
 cd /opt/flexshift
 [ -f deploy/.env ] || { echo "deploy/.env is missing: run deploy/init-env.sh <server-ip> on your laptop first"; exit 1; }
 docker compose -f deploy/docker-compose.prod.yml --env-file deploy/.env up -d --build --remove-orphans
+chmod +x deploy/flexshift.sh && ln -sf /opt/flexshift/deploy/flexshift.sh /usr/local/bin/flexshift   # `flexshift logs api` from anywhere
 docker image prune -f >/dev/null
 docker compose -f deploy/docker-compose.prod.yml --env-file deploy/.env ps
 REMOTE

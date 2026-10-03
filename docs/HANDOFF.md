@@ -33,6 +33,8 @@ Production has **no demo accounts**. It is a testing deployment on a free `sslip
 The owner plans to move to AWS (or an NZ/AU host) and buy a domain before going live.
 
 ### Operating it
+On the server, `flexshift logs api`, `flexshift errors 24h`, `flexshift ps`, `flexshift backup` work from any directory (see `deploy/DEPLOY.md`).
+
 ```bash
 # deploy the current working tree (rsync + docker compose up --build; migrations run on API start)
 SSH_OPTS="-i ~/.ssh/flexshift -o IdentitiesOnly=yes" deploy/push.sh root@204.168.199.75

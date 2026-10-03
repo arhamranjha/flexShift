@@ -55,6 +55,17 @@ your provider's server snapshots, and copy backups off the server (set `RCLONE_R
 
 Restore a database dump: `gunzip -c db-<stamp>.sql.gz | docker compose -f deploy/docker-compose.prod.yml --env-file deploy/.env exec -T postgres psql -U flexshift -d flexshift`
 
+## Day-to-day on the server
+`deploy/push.sh` installs a `flexshift` command that works from any directory:
+```
+flexshift logs api        # follow the API log (JSON, one line per request, with a request id); also: caddy, web-admin, worker-portal, postgres
+flexshift errors 24h      # API requests that failed (4xx/5xx) in the last 24 hours
+flexshift ps              # containers and health        flexshift health   # API + database check
+flexshift backup          # back up now                  flexshift restart api
+```
+Container logs are capped (3 files x 10 MB each) so they cannot fill the disk. Other logs: `/var/log/flexshift-backup.log` (nightly backup),
+`/var/log/auth.log` (SSH), `journalctl -u docker`. Plain `docker compose` commands only work from `/opt/flexshift`.
+
 ## Checks
 - `curl https://api.<domain>/health` → `{"status":"ok"}` (point an uptime monitor at it)
 - `docker compose -f deploy/docker-compose.prod.yml --env-file deploy/.env logs -f api` (JSON access log lines include a request id)
