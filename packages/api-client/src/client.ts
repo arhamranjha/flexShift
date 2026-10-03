@@ -12,7 +12,13 @@ export class ApiError extends Error {
 
 export interface ClientOptions {
   baseUrl: string;
-  getToken: () => string | null;
+  /**
+   * Browser apps: the session lives in an HttpOnly cookie the server sets, so scripts never see a token.
+   * Naming the app selects its own cookie and turns on credentialed requests plus the CSRF header.
+   */
+  app?: 'admin' | 'worker';
+  /** Bearer token for non-browser callers (tools, tests). Browser apps return null. */
+  getToken?: () => string | null;
   /** Called on any 401 so the app can drop the session. */
   onUnauthorized?: () => void;
 }
@@ -28,11 +34,13 @@ const qs = (q?: Query) => {
 
 export function createApiClient(opts: ClientOptions) {
   async function raw(path: string, init: RequestInit = {}) {
-    const token = opts.getToken();
+    const token = opts.getToken?.() ?? null;
     const isForm = typeof FormData !== 'undefined' && init.body instanceof FormData;
     const res = await fetch(`${opts.baseUrl}${path}`, {
       ...init,
+      ...(opts.app ? { credentials: 'include' as const } : {}),
       headers: {
+        ...(opts.app ? { 'X-FlexShift-App': opts.app, 'X-Requested-With': 'flexshift' } : {}),
         ...(init.body && !isForm ? { 'Content-Type': 'application/json' } : {}),
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
         ...(init.headers as Record<string, string>),

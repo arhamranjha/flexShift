@@ -3,7 +3,6 @@
 import { createApiClient, type FacilityBranch, type User } from '@flexshift/api-client';
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 
-const TOKEN_KEY = 'flexshift_token';
 const BRANCH_KEY = 'flexshift_branch';
 export const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
 
@@ -12,7 +11,7 @@ let unauthorizedHandler: (() => void) | undefined;
 /** Single shared API client for the admin app. */
 export const api = createApiClient({
   baseUrl: API_BASE_URL,
-  getToken: () => (typeof window === 'undefined' ? null : window.localStorage.getItem(TOKEN_KEY)),
+  app: 'admin', // the session is an HttpOnly cookie; no token is stored in the browser
   onUnauthorized: () => unauthorizedHandler?.(),
 });
 
@@ -38,17 +37,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const clear = useCallback(() => {
-    window.localStorage.removeItem(TOKEN_KEY);
-    setUser(null);
-  }, []);
+  const clear = useCallback(() => setUser(null), []);
 
   useEffect(() => {
     unauthorizedHandler = clear;
-    if (!window.localStorage.getItem(TOKEN_KEY)) {
-      setLoading(false);
-      return;
-    }
+    // Ask the server whether the cookie holds a valid staff session.
     api.auth.me().then(
       (u) => (STAFF.includes(u.role) ? setUser(u) : clear()),
       clear,
@@ -58,9 +51,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const login = useCallback(async (email: string, password: string) => {
     const res = await api.auth.login(email, password);
     if (!STAFF.includes(res.user.role)) {
+      await api.auth.logout().catch(() => {}); // the server already set a cookie: drop it
       throw new Error('This dashboard is for organization staff. Relief workers should use the worker portal.');
     }
-    window.localStorage.setItem(TOKEN_KEY, res.accessToken);
     setUser(res.user);
     return res.user;
   }, []);
@@ -71,8 +64,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [clear]);
 
   const changePassword = useCallback(async (current: string, next: string) => {
-    const { accessToken } = await api.auth.changePassword(current, next);
-    window.localStorage.setItem(TOKEN_KEY, accessToken);
+    await api.auth.changePassword(current, next); // the server rotates the session cookie
     setUser(await api.auth.me());
   }, []);
 

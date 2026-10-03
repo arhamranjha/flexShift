@@ -1,4 +1,6 @@
-import { Controller, Post, Body, Get, HttpCode, UseGuards } from '@nestjs/common';
+import { Controller, Post, Body, Get, HttpCode, Req, Res, UseGuards } from '@nestjs/common';
+import type { Request, Response } from 'express';
+import { clearSessionCookie, setSessionCookie } from './session';
 import { Throttle } from '@nestjs/throttler';
 import { AuthService } from './auth.service';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
@@ -14,14 +16,18 @@ export class AuthController {
   @Post('login')
   @HttpCode(200)
   @Throttle(AUTH_LIMIT)
-  login(@Body() body: LoginDto) {
-    return this.authService.login(body);
+  async login(@Body() body: LoginDto, @Req() req: Request, @Res({ passthrough: true }) res: Response) {
+    const result = await this.authService.login(body);
+    setSessionCookie(req, res, result.accessToken);
+    return result;
   }
 
   @Post('register/relief-worker')
   @Throttle(AUTH_LIMIT)
-  registerReliefWorker(@Body() body: RegisterReliefWorkerDto) {
-    return this.authService.registerReliefWorker(body);
+  async registerReliefWorker(@Body() body: RegisterReliefWorkerDto, @Req() req: Request, @Res({ passthrough: true }) res: Response) {
+    const result = await this.authService.registerReliefWorker(body);
+    setSessionCookie(req, res, result.accessToken);
+    return result;
   }
 
   @UseGuards(JwtAuthGuard)
@@ -34,14 +40,17 @@ export class AuthController {
   @UseGuards(JwtAuthGuard)
   @Post('logout')
   @HttpCode(200)
-  logout(@CurrentUser() user: any) {
+  async logout(@CurrentUser() user: any, @Req() req: Request, @Res({ passthrough: true }) res: Response) {
+    clearSessionCookie(req, res);
     return this.authService.logout(user.id);
   }
 
   @UseGuards(JwtAuthGuard)
   @Post('change-password')
   @HttpCode(200)
-  changePassword(@CurrentUser() user: any, @Body() body: ChangePasswordDto) {
-    return this.authService.changePassword(user.id, body);
+  async changePassword(@CurrentUser() user: any, @Body() body: ChangePasswordDto, @Req() req: Request, @Res({ passthrough: true }) res: Response) {
+    const result = await this.authService.changePassword(user.id, body);
+    setSessionCookie(req, res, result.accessToken); // the old token was just revoked
+    return result;
   }
 }

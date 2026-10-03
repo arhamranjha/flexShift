@@ -864,4 +864,44 @@ describe('automation: cascade, expiry, notifications, checklists, benchmarks', (
     expect((await mk(true, 76)).nextCascadeAt).not.toBeNull();
     expect((await mk(false, 77)).nextCascadeAt).toBeNull();
   });
+
+  it('signs sessions into an HttpOnly cookie per app, with CSRF protection', async () => {
+    const admin = request.agent(baseUrl);
+    const loginRes = await admin.post('/auth/login').set('X-FlexShift-App', 'admin').set('X-Requested-With', 'flexshift')
+      .send({ email: 'richmond.mgr@apexhealth.co.uk', password: PW }).expect(200);
+    const setCookie = ([] as string[]).concat(loginRes.headers['set-cookie'] as any).join(';');
+    expect(setCookie).toMatch(/fs_admin=/);
+    expect(setCookie).toMatch(/HttpOnly/i);
+    expect(setCookie).toMatch(/SameSite=Lax/i);
+
+    // the cookie alone authenticates reads
+    expect((await admin.get('/auth/me').set('X-FlexShift-App', 'admin').expect(200)).body.email).toBe('richmond.mgr@apexhealth.co.uk');
+    // ...but another app's cookie jar slot is separate: the worker app sees no session
+    await admin.get('/auth/me').set('X-FlexShift-App', 'worker').expect(401);
+    // state-changing requests need the custom header when they rely on the cookie (CSRF defence)
+    await admin.post('/shifts').set('X-FlexShift-App', 'admin').send({}).expect(403);
+    await admin.post('/shifts').set('X-FlexShift-App', 'admin').set('X-Requested-With', 'flexshift').send({}).expect(400); // passes CSRF, fails validation
+    // bearer callers do not need the header
+    await post(richmondT, '/shifts', {}).expect(400);
+
+    // logout clears the cookie and revokes the token
+    const out = await admin.post('/auth/logout').set('X-FlexShift-App', 'admin').set('X-Requested-With', 'flexshift').expect(200);
+    expect(([] as string[]).concat(out.headers['set-cookie'] as any).join(';')).toMatch(/fs_admin=;/);
+    await admin.get('/auth/me').set('X-FlexShift-App', 'admin').expect(401);
+    richmondT = await login('richmond.mgr@apexhealth.co.uk'); // logout revoked every earlier token for this user
+  });
+
+  it('rotates the cookie when the password changes', async () => {
+    const created = await post(richmondT, '/relief-workers/concierge', {
+      email: 'cookie@flexrelief.co.uk', firstName: 'C', lastName: 'K', phone: '07700900777', registrationNumber: 'GPHC-7777777',
+    }).expect(201);
+    const agent = request.agent(baseUrl);
+    await agent.post('/auth/login').set('X-FlexShift-App', 'worker').set('X-Requested-With', 'flexshift')
+      .send({ email: 'cookie@flexrelief.co.uk', password: created.body.temporaryPassword }).expect(200);
+    await agent.get('/shifts/feed').set('X-FlexShift-App', 'worker').expect(403); // must change password first
+    const changed = await agent.post('/auth/change-password').set('X-FlexShift-App', 'worker').set('X-Requested-With', 'flexshift')
+      .send({ currentPassword: created.body.temporaryPassword, newPassword: 'CookiePass123!' }).expect(200);
+    expect(([] as string[]).concat(changed.headers['set-cookie'] as any).join(';')).toMatch(/fs_worker=/);
+    await agent.get('/shifts/feed').set('X-FlexShift-App', 'worker').expect(200); // new cookie works
+  });
 });
