@@ -4,35 +4,34 @@ A single small Linux server runs everything in Docker: Postgres, the API, the da
 (automatic HTTPS). It was tested locally end to end (HTTPS, migrations, first admin, secure cookies, CORS).
 
 ## Before you start
-- A server running Ubuntu 24.04 with a public IP, SSH key access, and ports 22/80/443 open.
-- A domain with three **A records** pointing at the server: `app.<domain>`, `work.<domain>`, `api.<domain>`.
-  The three must share one registrable domain (the session cookies are `SameSite=Lax`).
+- A server running Ubuntu 24.04 with a public IPv4, SSH key access, and ports 22/80/443 open.
+- **No domain needed for testing:** `deploy/init-env.sh <server-ip>` uses free sslip.io names
+  (`app.<ip-with-dashes>.sslip.io`, `work....`, `api....`). With a real domain later, add three A records
+  (`app.`, `work.`, `api.`) at the server and run `deploy/init-env.sh --domain example.com` instead.
+  The three names must share one parent domain (the session cookies are `SameSite=Lax`).
 
 ## One time
 ```bash
-# 1. prepare the server (as root): Docker, firewall, fail2ban, automatic security updates, swap
+# 1. on the server (as root): Docker, firewall, fail2ban, automatic security updates, swap
 scp deploy/bootstrap-server.sh root@SERVER:/root/ && ssh root@SERVER bash /root/bootstrap-server.sh
 
-# 2. create the environment file on the server
-ssh root@SERVER 'mkdir -p /opt/flexshift/deploy'
-scp deploy/.env.production.example root@SERVER:/opt/flexshift/deploy/.env
-ssh root@SERVER nano /opt/flexshift/deploy/.env     # set DOMAIN, POSTGRES_PASSWORD, JWT_SECRET (openssl rand -base64 36)
+# 2. on your laptop: generate the environment file (strong random secrets). Keep a copy in your password manager.
+deploy/init-env.sh SERVER_IP
 ```
 
 ## Deploy (and every later update)
 ```bash
 deploy/push.sh root@SERVER
 ```
-Migrations run automatically when the API container starts.
+The first run also sends `deploy/.env`. Migrations run automatically when the API starts, and Caddy fetches the HTTPS
+certificates on first start (give it a minute).
 
 ## Create the first administrator
-Production has no demo accounts. Create your own super admin (it must change the password at first sign-in):
+Production has no demo accounts. Create your own super admin; it must change the password at first sign-in:
 ```bash
-ssh root@SERVER 'cd /opt/flexshift && docker compose -f deploy/docker-compose.prod.yml --env-file deploy/.env exec -T \
-  -e ADMIN_EMAIL=you@example.com -e ADMIN_PASSWORD="a long passphrase" -w /repo/apps/backend-api api node dist/cli/create-admin.js'
+deploy/create-admin.sh root@SERVER you@example.com
 ```
-Then sign in at `https://app.<domain>`, add your organization and branches (as the super admin, via the API/Swagger-less
-flows) and invite managers from Settings. Do **not** run the demo seed on a real server.
+Then sign in at `https://app.<domain>`. Do **not** run the demo seed on a real server.
 
 ## Backups
 ```bash
