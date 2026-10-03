@@ -10,10 +10,13 @@
     "dev:web": "pnpm --filter web-admin dev",
     "dev:portal": "pnpm --filter worker-portal dev",
     "test:backend": "pnpm --filter backend-api test",
-    "lint": "pnpm -r lint"
+    "lint": "eslint . && pnpm -r lint"
   },
   "devDependencies": {
-    "typescript": "^5.4.5"
+    "eslint": "^10.11.0",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "typescript": "^5.4.5",
+    "typescript-eslint": "^8.71.0"
   },
   "packageManager": "pnpm@11.25.0"
 }

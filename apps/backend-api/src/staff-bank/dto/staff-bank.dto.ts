@@ -1,4 +1,3 @@
-import { PartialType, PickType } from '@nestjs/swagger';
 import { IsBoolean, IsEnum, IsNumber, IsOptional, IsString, IsUUID, Max, MaxLength, Min, ValidateIf } from 'class-validator';
 import { StaffBankTier } from '@prisma/client';
 

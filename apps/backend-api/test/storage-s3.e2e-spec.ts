@@ -24,7 +24,10 @@ d('StorageService (S3 backend)', () => {
     storage = new StorageService();
   });
   afterAll(() => {
-    for (const [k, v] of Object.entries(saved)) (v === undefined ? delete process.env[k] : (process.env[k] = v));
+    for (const [k, v] of Object.entries(saved)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
   });
 
   it('selects the S3 backend from the environment', () => {

@@ -23,7 +23,8 @@ Legend: [x] done · [~] partly done · [ ] not started
 - [x] Leave conflict detection (same person cannot hold overlapping pending/approved leave at a branch)
 - [ ] Per-organization document *verification* (today any in-scope organization can verify a worker's documents; verified status is global)
 - [ ] Worker distance/postcode filtering for the feed
-- [ ] ESLint + Prettier (lint script is type-checking only)
+- [x] ESLint (typescript-eslint; floating/misused promises in the API, hooks rules in the UIs) wired into `pnpm lint` and CI
+- [ ] Prettier / formatting convention
 - [x] Emergency broadcast: notifies every verified worker and ignores minimum-rate thresholds (feed emergencies tab too)
 
 ## Organization dashboard (`apps/web-admin`)

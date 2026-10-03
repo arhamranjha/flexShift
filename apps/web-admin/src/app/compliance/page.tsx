@@ -35,7 +35,6 @@ function Preview({ docId }: { docId: string }) {
   return (
     <div className="space-y-2">
       {state.type?.startsWith('image/')
-        // eslint-disable-next-line @next/next/no-img-element
         ? <img src={state.url} alt="Document" className="max-h-80 mx-auto rounded-lg border border-slate-200" />
         : <iframe src={state.url} title="Document preview" className="w-full h-80 rounded-lg border border-slate-200" />}
       <a href={state.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-700 hover:underline">

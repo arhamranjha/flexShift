@@ -25,7 +25,7 @@ docker compose up -d                              # Postgres 16 on :5432 (db fle
 cp apps/backend-api/.env.example apps/backend-api/.env   # JWT_SECRET must be >= 32 chars or the API refuses to boot
 cd apps/backend-api && pnpm exec prisma migrate deploy && pnpm seed
 pnpm dev:backend | pnpm dev:web | pnpm dev:portal # :4000 (Swagger /api/docs) / :3000 / :3001
-pnpm lint                                         # tsc --noEmit in every workspace package (there is no ESLint yet)
+pnpm lint                                         # ESLint (typescript-eslint, type-aware floating-promise rules in the API, react-hooks in the UIs) + tsc --noEmit in every workspace package
 pnpm test:backend                                 # = cd apps/backend-api && jest --runInBand
 cd apps/backend-api && npx jest -t "tenant isolation"   # single test / describe by name
 cd apps/backend-api && npx jest test/client-contract     # a single spec file

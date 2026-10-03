@@ -78,7 +78,7 @@ export default function RotaPage() {
       .sort((a, b) => +new Date(a.startTime) - +new Date(b.startTime));
   }, [branchIds.join(','), start.getTime(), end.getTime()]);
 
-  const shifts = data ?? [];
+  const shifts = useMemo(() => data ?? [], [data]);
   const byDay = useMemo(() => {
     const m = new Map<string, RotaShift[]>();
     for (const s of shifts) {

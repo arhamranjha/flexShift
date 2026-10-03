@@ -24,6 +24,12 @@ backend:
     - pnpm test
     - pnpm build
 
+lint:
+  stage: check
+  <<: *pnpm
+  script:
+    - pnpm exec eslint .
+
 packages:
   stage: check
   <<: *pnpm

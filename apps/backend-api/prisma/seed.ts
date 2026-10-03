@@ -1,4 +1,4 @@
-import { PrismaClient, Role, DocType, DocStatus, ShiftStatus, ShiftVisibility, StaffBankTier, TimesheetStatus, InvoiceStatus, LeaveType, LeaveStatus } from '@prisma/client';
+import { PrismaClient, Role, DocType, DocStatus, ShiftStatus, ShiftVisibility, StaffBankTier } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
 
 const prisma = new PrismaClient();
@@ -310,7 +310,7 @@ async function main() {
   const tomorrowEnd = new Date(tomorrow);
   tomorrowEnd.setHours(17, 30, 0, 0);
 
-  const shift1 = await prisma.shift.create({
+  await prisma.shift.create({
     data: {
       branchId: richmondBranch.id,
       title: 'Sole Charge Clinical Relief Pharmacist',
@@ -336,7 +336,7 @@ async function main() {
   nextWeekEnd.setDate(nextWeekEnd.getDate() + 1);
   nextWeekEnd.setHours(4, 30, 0, 0);
 
-  const shiftEmergency = await prisma.shift.create({
+  await prisma.shift.create({
     data: {
       branchId: beckenhamBranch.id,
       title: 'Emergency Overnight Relief Cover',
