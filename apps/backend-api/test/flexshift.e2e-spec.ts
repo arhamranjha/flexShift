@@ -1201,6 +1201,95 @@ describe('automation: cascade, expiry, notifications, checklists, benchmarks', (
       expect((await get(wT, '/notifications').expect(200)).body.items.filter((n: any) => n.type === 'DOCUMENT_VERIFIED')).toHaveLength(5);
       expect((await post(wT, `/shifts/${shift.id}/instant-book`).expect(201)).body.status).toBe('BOOKED');
     });
+
+    it('document sharing: a self-registered worker asks an organization to review them; only that organization sees them, and only while pending', async () => {
+      const reg = (await api().post('/auth/register/relief-worker').send({
+        email: `share-${Date.now()}@worker.test`, password: 'WorkerPass123!', firstName: 'Share', lastName: 'Requester', phone: '+64 21 555 0200', registrationNumber: `SHR-${Date.now() % 1e7}`,
+      }).expect(201)).body;
+      const wT = reg.accessToken as string;
+      const wId = reg.user.reliefProfile.id as string;
+      const docIds: string[] = [];
+      for (const type of ['IDENTITY', 'RIGHT_TO_WORK', 'DBS_POLICE_CHECK', 'INDEMNITY_INSURANCE', 'PRACTISING_CERTIFICATE']) {
+        const up = await api().post(`/relief-workers/${wId}/documents`).set('Authorization', `Bearer ${wT}`).field('type', type)
+          .field('expiresAt', at(400, 0)).attach('file', Buffer.from('%PDF-1.4 share'), { filename: `${type}.pdf` }).expect(201);
+        docIds.push(up.body.id);
+      }
+      const sees = async (t: string) => (await get(t, '/relief-workers/documents/queue').expect(200)).body.some((d: any) => docIds.includes(d.id));
+      const nzCode = (await prisma.organization.findUnique({ where: { id: nzOrgId } })).code as string;
+      const shareNotes = (t: string, type: string) => get(t, '/notifications').expect(200).then((r) => r.body.items.filter((n: any) => n.type === type));
+      expect(await sees(nzMgrT)).toBe(false);
+
+      // validation and roles
+      await post(wT, '/relief-workers/me/document-shares', {}).expect(400);
+      await post(wT, '/relief-workers/me/document-shares', { organizationId: nzOrgId, organizationCode: nzCode }).expect(400);
+      await post(wT, '/relief-workers/me/document-shares', { organizationCode: 'NOSUCHORG' }).expect(404);
+      await post(nzAdminT, '/relief-workers/me/document-shares', { organizationId: nzOrgId }).expect(403);
+      await get(wT, '/document-shares').expect(403);
+
+      // ask by code (case does not matter); only that organization is told and can now review the documents
+      const share = (await post(wT, '/relief-workers/me/document-shares', { organizationCode: nzCode.toLowerCase() }).expect(201)).body;
+      expect(share).toMatchObject({ status: 'PENDING', organization: { id: nzOrgId } });
+      await post(wT, '/relief-workers/me/document-shares', { organizationId: nzOrgId }).expect(409);
+      expect((await shareNotes(nzAdminT, 'DOCUMENT_SHARE_REQUESTED')).some((n: any) => n.body.includes('Share Requester'))).toBe(true);
+      expect((await shareNotes(adminT, 'DOCUMENT_SHARE_REQUESTED')).some((n: any) => n.body.includes('Share Requester'))).toBe(false);
+      expect(await sees(nzMgrT)).toBe(true);
+      expect(await sees(adminT)).toBe(false);
+      const nzList = (await get(nzMgrT, '/document-shares').expect(200)).body;
+      expect(nzList.find((s: any) => s.id === share.id).reliefWorker.documents).toHaveLength(5);
+      expect((await get(adminT, '/document-shares').expect(200)).body.some((s: any) => s.id === share.id)).toBe(false);
+      await post(adminT, `/document-shares/${share.id}/accept`, {}).expect(404); // another tenant cannot answer it
+
+      // withdrawing hides the worker again; asking again reopens the same request
+      await post(wT, `/relief-workers/me/document-shares/${share.id}/withdraw`).expect(201);
+      await post(wT, `/relief-workers/me/document-shares/${share.id}/withdraw`).expect(409);
+      expect(await sees(nzMgrT)).toBe(false);
+      await post(nzMgrT, `/document-shares/${share.id}/accept`, {}).expect(409);
+      expect((await post(wT, '/relief-workers/me/document-shares', { organizationId: nzOrgId }).expect(201)).body).toMatchObject({ id: share.id, status: 'PENDING' });
+
+      // the organization verifies the documents, then accepts: the worker joins its staff bank (a manager adds to their own branch)
+      for (const id of docIds) await patch(nzMgrT, `/relief-workers/documents/${id}/verify`, { status: 'VERIFIED' }).expect(200);
+      expect((await prisma.reliefProfile.findUnique({ where: { id: wId } })).isVerified).toBe(true);
+      const accepted = await Promise.all([
+        post(nzMgrT, `/document-shares/${share.id}/accept`, { tier: 'TIER_1_PREFERRED' }),
+        post(nzAdminT, `/document-shares/${share.id}/decline`),
+      ]);
+      expect(accepted.map((r) => r.status).sort()).toEqual([201, 409]); // two people answering at once: exactly one wins
+      const won = accepted.find((r) => r.status === 201)!.body.status;
+      if (won === 'ACCEPTED') {
+        const member = await prisma.staffBankMember.findUnique({ where: { organizationId_reliefWorkerId: { organizationId: nzOrgId, reliefWorkerId: wId } } });
+        expect(member).toMatchObject({ tier: 'TIER_1_PREFERRED', branchId: nzBranchId });
+        // the share is no longer pending, but the worker stays in scope through the staff bank
+        expect((await get(nzMgrT, `/relief-workers/${wId}`).expect(200)).body.id).toBe(wId);
+        await post(wT, '/relief-workers/me/document-shares', { organizationId: nzOrgId }).expect(409); // already in the bank
+        expect(await shareNotes(wT, 'DOCUMENT_SHARE_ACCEPTED')).toHaveLength(1);
+      } else {
+        expect(await shareNotes(wT, 'DOCUMENT_SHARE_DECLINED')).toHaveLength(1);
+      }
+
+      // declining: the organization loses sight of the worker and cannot be asked again
+      await get(adminT, `/relief-workers/${wId}`).expect(404);
+      const toApex = (await post(wT, '/relief-workers/me/document-shares', { organizationId: apexId }).expect(201)).body;
+      await get(adminT, `/relief-workers/${wId}`).expect(200);
+      await post(adminT, `/document-shares/${toApex.id}/decline`).expect(201);
+      await get(adminT, `/relief-workers/${wId}`).expect(404);
+      await post(wT, '/relief-workers/me/document-shares', { organizationId: apexId }).expect(409);
+      const mine = (await get(wT, '/relief-workers/me/document-shares').expect(200)).body;
+      expect(mine.find((s: any) => s.id === toApex.id)).toMatchObject({ status: 'DECLINED', organization: { name: expect.any(String) } });
+    });
+
+    it('document sharing: a worker can have at most five requests waiting', async () => {
+      const reg = (await api().post('/auth/register/relief-worker').send({
+        email: `sharecap-${Date.now()}@worker.test`, password: 'WorkerPass123!', firstName: 'Cap', lastName: 'Test', phone: '+64 21 555 0300', registrationNumber: `CAP-${Date.now() % 1e7}`,
+      }).expect(201)).body;
+      const orgs = await prisma.organization.findMany({ where: { isActive: true }, select: { id: true }, take: 6 });
+      const extra = 6 - orgs.length;
+      for (let i = 0; i < extra; i++) {
+        orgs.push(await prisma.organization.create({ data: { name: `Cap Org ${i}`, slug: `cap-org-${i}-${Date.now()}`, code: `CAPORG${i}${Date.now() % 1e5}`, billingEmail: 'cap@org.test', phone: '1' }, select: { id: true } }));
+      }
+      for (const o of orgs.slice(0, 5)) await post(reg.accessToken, '/relief-workers/me/document-shares', { organizationId: o.id }).expect(201);
+      const sixth = await post(reg.accessToken, '/relief-workers/me/document-shares', { organizationId: orgs[5].id }).expect(400);
+      expect(sixth.body.message).toMatch(/at most 5/);
+    });
   });
 
   it('lets a super admin onboard a customer through the API, and nobody else', async () => {

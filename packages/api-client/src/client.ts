@@ -150,6 +150,19 @@ export function createApiClient(opts: ClientOptions) {
       toggleWatch: (shiftId: string) => send<{ watched: boolean }>('POST', `/relief-workers/me/watch-shift/${shiftId}`),
       toggleFavourite: (branchId: string) => send<{ favourited: boolean }>('POST', `/relief-workers/me/favourite-branch/${branchId}`),
     },
+    documentShares: {
+      /** Worker: their own requests. */
+      mine: () => get<T.DocumentShare[]>('/relief-workers/me/document-shares'),
+      /** Worker: name the organization by id (from a shift) or by the code it handed out. */
+      create: (body: { organizationId: string } | { organizationCode: string }) =>
+        send<T.DocumentShare>('POST', '/relief-workers/me/document-shares', body),
+      withdraw: (id: string) => send<T.DocumentShare>('POST', `/relief-workers/me/document-shares/${id}/withdraw`),
+      /** Staff: requests addressed to their organization (super admins may pass organizationId). */
+      list: (q?: { status?: T.DocumentShareStatus; organizationId?: string }) => get<T.DocumentShare[]>('/document-shares', q),
+      accept: (id: string, body: { tier?: T.StaffBankTier; branchId?: string } = {}) =>
+        send<T.DocumentShare>('POST', `/document-shares/${id}/accept`, body),
+      decline: (id: string) => send<T.DocumentShare>('POST', `/document-shares/${id}/decline`),
+    },
     timesheets: {
       byBranch: (branchId: string, status?: T.TimesheetStatus) => get<T.Timesheet[]>(`/timesheets/branch/${branchId}`, { status }),
       mine: () => get<T.Timesheet[]>('/timesheets/my-timesheets'),
