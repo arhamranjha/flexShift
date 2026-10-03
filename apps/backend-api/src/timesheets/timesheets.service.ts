@@ -2,6 +2,7 @@ import { Injectable, BadRequestException, ConflictException, NotFoundException }
 import { PrismaService } from '../prisma/prisma.service';
 import { TimesheetStatus, InvoiceStatus, ShiftStatus } from '@prisma/client';
 import { randomBytes } from 'crypto';
+import { formatMoney } from '../common/markets';
 import { AccessService, AuthUser } from '../common/access.service';
 import { ClockInDto, ClockOutDto, SubmitTimesheetDto } from './dto/timesheet.dto';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -198,6 +199,7 @@ export class TimesheetsService {
           reliefWorkerId: ts.reliefWorkerId,
           timesheetId: ts.id,
           totalAmount: ts.totalPayout,
+          currency: ts.shift.currency,
           status: InvoiceStatus.ISSUED,
           dueAt: dueDate,
         },
@@ -206,7 +208,7 @@ export class TimesheetsService {
       return { timesheet: updatedTs, invoice };
     });
     await this.notifications.notifyWorker(ts.reliefWorkerId, {
-      type: 'TIMESHEET_APPROVED', title: 'Timesheet approved: invoice issued', body: `${result.invoice.invoiceNumber} · £${Number(result.invoice.totalAmount).toFixed(2)}`, link: '/finance',
+      type: 'TIMESHEET_APPROVED', title: 'Timesheet approved: invoice issued', body: `${result.invoice.invoiceNumber} · ${formatMoney(result.invoice.totalAmount, result.invoice.currency)}`, link: '/finance',
     });
     return result;
   }

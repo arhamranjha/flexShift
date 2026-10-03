@@ -3,19 +3,10 @@ import { PrismaService } from '../prisma/prisma.service';
 import { LeaveStatus, LeaveType, Prisma, ShiftStatus, ShiftVisibility } from '@prisma/client';
 import { AccessService, AuthUser } from '../common/access.service';
 import { SubmitLeaveDto } from './dto/leave.dto';
+import { zonedTime } from '../common/time';
 
 /** Canonical form of a person's name: Unicode-normalised, single spaces, trimmed. */
 const normalizeName = (name: string) => name.normalize('NFKC').replace(/\s+/g, ' ').trim();
-
-/** The instant at which a Europe/London wall-clock time occurs on the given calendar day (handles BST). */
-function londonTime(day: Date, hour: number, minute: number) {
-  const guess = Date.UTC(day.getUTCFullYear(), day.getUTCMonth(), day.getUTCDate(), hour, minute);
-  const part = new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/London', timeZoneName: 'shortOffset' })
-    .formatToParts(new Date(guess))
-    .find((p) => p.type === 'timeZoneName')?.value; // "GMT" or "GMT+1"
-  const offsetHours = part && part !== 'GMT' ? Number(part.replace('GMT', '')) : 0;
-  return new Date(guess - offsetHours * 3_600_000);
-}
 
 @Injectable()
 export class LeaveService {
@@ -99,6 +90,7 @@ export class LeaveService {
     const reviewerUserId = user.id;
     const leave = await this.prisma.leaveRequest.findFirst({
       where: { id, branch: this.access.branchScope(user) },
+      include: { branch: { include: { organization: { select: { timezone: true, currency: true } } } } },
     });
     if (!leave) throw new NotFoundException('Leave request not found');
     if (leave.status !== LeaveStatus.PENDING) {
@@ -135,8 +127,8 @@ export class LeaveService {
           const last = Date.UTC(end.getUTCFullYear(), end.getUTCMonth(), end.getUTCDate());
           for (; day.getTime() <= last; day.setUTCDate(day.getUTCDate() + 1)) {
             windows.push({
-              start: londonTime(day, 9, 0),
-              end: londonTime(day, 17, 30),
+              start: zonedTime(day, 9, 0, leave.branch.organization.timezone),
+              end: zonedTime(day, 17, 30, leave.branch.organization.timezone),
             });
           }
         }
@@ -158,6 +150,7 @@ export class LeaveService {
               totalEstimatedPay: Number((hours * rate).toFixed(2)),
               visibility: ShiftVisibility.STAFF_BANK_ONLY,
               status: ShiftStatus.OPEN,
+              currency: leave.branch.organization.currency,
               notes: `Auto-generated backfill for ${leave.staffName} approved leave`,
             },
           });

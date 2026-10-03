@@ -23,6 +23,7 @@ import { AnalyticsModule } from './analytics/analytics.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { JobsModule } from './jobs/jobs.module';
 import { HealthModule } from './health/health.module';
+import { MarketsModule } from './markets/markets.module';
 
 @Module({
   imports: [
@@ -35,6 +36,7 @@ import { HealthModule } from './health/health.module';
     ScheduleModule.forRoot(),
     JobsModule,
     HealthModule,
+    MarketsModule,
     AuthModule,
     UsersModule,
     OrganizationsModule,

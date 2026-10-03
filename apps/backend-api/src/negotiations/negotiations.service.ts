@@ -4,6 +4,7 @@ import { ApplicationStatus, NegotiationStatus, Prisma, Role, ShiftStatus } from 
 import { AccessService, AuthUser } from '../common/access.service';
 import { assertShiftBookable, assertWorkerCanBook, lockWorker } from '../shifts/eligibility';
 import { NotificationsService } from '../notifications/notifications.service';
+import { formatMoney } from '../common/markets';
 import { CreateNegotiationDto, NegotiationQueryDto } from './dto/negotiation.dto';
 
 const ACTIVE = [NegotiationStatus.PENDING, NegotiationStatus.COUNTERED];
@@ -18,13 +19,13 @@ export class NegotiationsService {
   ) {}
 
   async createNegotiation(workerId: string, dto: CreateNegotiationDto) {
-    let shiftInfo: { title: string; branchId: string };
+    let shiftInfo: { title: string; branchId: string; currency: string };
 
     const negotiation = await this.prisma.$transaction(async (tx) => {
       const { shift } = await assertWorkerCanBook(tx, dto.shiftId, workerId);
       assertShiftBookable(shift.status);
       if (shift.startTime.getTime() < Date.now()) throw new BadRequestException('Shift has already started');
-      shiftInfo = { title: shift.title, branchId: shift.branchId };
+      shiftInfo = { title: shift.title, branchId: shift.branchId, currency: shift.currency };
 
       const start = dto.proposedStartTime ? new Date(dto.proposedStartTime) : null;
       const end = dto.proposedEndTime ? new Date(dto.proposedEndTime) : null;
@@ -58,7 +59,7 @@ export class NegotiationsService {
     await this.notifications.notifyBranchStaff(shiftInfo.branchId, {
       type: 'NEGOTIATION_PROPOSED',
       title: 'New rate proposal',
-      body: `£${Number(dto.proposedHourlyRate).toFixed(2)}/h proposed on ${shiftInfo.title}`,
+      body: `${formatMoney(dto.proposedHourlyRate, shiftInfo.currency)}/h proposed on ${shiftInfo.title}`,
       link: '/negotiations',
     });
     return negotiation;
@@ -104,7 +105,7 @@ export class NegotiationsService {
   /** Tells the other side of the negotiation that something happened. */
   private async notifyCounterparty(
     user: AuthUser,
-    neg: { reliefWorkerId: string; shift: { id: string; title: string; branchId: string } },
+    neg: { reliefWorkerId: string; shift: { id: string; title: string; branchId: string; currency: string } },
     type: string,
     title: string,
   ) {
@@ -116,7 +117,7 @@ export class NegotiationsService {
   }
 
   async acceptNegotiation(id: string, user: AuthUser) {
-    let actedOn: { reliefWorkerId: string; shift: { id: string; title: string; branchId: string } };
+    let actedOn: { reliefWorkerId: string; shift: { id: string; title: string; branchId: string; currency: string } };
 
     const booked = await this.prisma.$transaction(async (tx) => {
       const neg = await this.loadActionable(tx, id, user);
@@ -182,7 +183,7 @@ export class NegotiationsService {
   }
 
   async counterOffer(id: string, rate: number, user: AuthUser) {
-    let actedOn: { reliefWorkerId: string; shift: { id: string; title: string; branchId: string } };
+    let actedOn: { reliefWorkerId: string; shift: { id: string; title: string; branchId: string; currency: string } };
 
     const updated = await this.prisma.$transaction(async (tx) => {
       const neg = await this.loadActionable(tx, id, user);
@@ -198,12 +199,12 @@ export class NegotiationsService {
       return tx.shiftNegotiation.findUniqueOrThrow({ where: { id } });
     });
 
-    await this.notifyCounterparty(user, actedOn, 'NEGOTIATION_COUNTERED', `Counter-offer: £${rate.toFixed(2)}/h`);
+    await this.notifyCounterparty(user, actedOn, 'NEGOTIATION_COUNTERED', `Counter-offer: ${formatMoney(rate, actedOn.shift.currency)}/h`);
     return updated;
   }
 
   async rejectNegotiation(id: string, user: AuthUser) {
-    let actedOn: { reliefWorkerId: string; shift: { id: string; title: string; branchId: string } };
+    let actedOn: { reliefWorkerId: string; shift: { id: string; title: string; branchId: string; currency: string } };
 
     const updated = await this.prisma.$transaction(async (tx) => {
       const neg = await this.loadActionable(tx, id, user);

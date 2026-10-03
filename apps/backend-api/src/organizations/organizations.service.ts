@@ -2,6 +2,7 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { Role } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AccessService, AuthUser } from '../common/access.service';
+import { marketFor } from '../common/markets';
 import { CreateOrganizationDto, UpdateOrganizationDto } from './dto/organization.dto';
 
 @Injectable()
@@ -35,11 +36,16 @@ export class OrganizationsService {
   }
 
   create(data: CreateOrganizationDto) {
-    return this.prisma.organization.create({ data });
+    const market = marketFor(data.country);
+    return this.prisma.organization.create({ data: { ...data, country: market.code, currency: market.currency, timezone: market.timezone } });
   }
 
   async update(user: AuthUser, id: string, dto: UpdateOrganizationDto) {
     this.access.assertOrg(user, id);
-    return this.prisma.organization.update({ where: { id }, data: dto });
+    const market = dto.country ? marketFor(dto.country) : null;
+    return this.prisma.organization.update({
+      where: { id },
+      data: { ...dto, ...(market ? { country: market.code, currency: market.currency, timezone: market.timezone } : {}) },
+    });
   }
 }

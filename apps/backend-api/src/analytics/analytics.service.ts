@@ -24,6 +24,8 @@ export class AnalyticsService {
     const orgIds = [...new Set(branches.map((b) => b.organizationId))];
     const now = new Date();
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    // Money totals are in one currency only when every organization in scope shares it.
+    const currencies = [...new Set((await this.prisma.organization.findMany({ where: { id: { in: orgIds } }, select: { currency: true } })).map((o) => o.currency))];
 
     const inScope = { branchId: { in: branchIds } };
     const [openShifts, emergencyOpen, upcomingBooked, windowTotal, windowFilled, urgentShifts, staffBankHeadcount, monthSpend, pendingTimesheets, pendingLeave, pendingNegotiations, pendingDocuments] =
@@ -69,6 +71,7 @@ export class AnalyticsService {
       fillRate: windowTotal ? Math.round((windowFilled / windowTotal) * 100) : null,
       staffBankHeadcount,
       monthSpend: Number(monthSpend._sum.totalAmount ?? 0),
+      currency: currencies.length === 1 ? currencies[0] : null,
       pendingTimesheets,
       pendingLeave,
       pendingNegotiations,

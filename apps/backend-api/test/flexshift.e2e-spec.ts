@@ -7,6 +7,7 @@ import { PrismaService } from '../src/prisma/prisma.service';
 import { JobsService } from '../src/jobs/jobs.service';
 import { MailerService } from '../src/notifications/mailer.service';
 import { createOrganization } from '../src/cli/create-org';
+import { zonedTime } from '../src/common/time';
 
 const PW = 'FlexShiftPass2026!';
 const DAY = 86_400_000;
@@ -995,5 +996,134 @@ describe('automation: cascade, expiry, notifications, checklists, benchmarks', (
     await upload('photo.png', Buffer.from('%PDF-1.4 x'), 'image/png').expect(400); // PDF bytes in a .png
     await upload('malware.exe', Buffer.from('MZ'), 'application/pdf').expect(400); // wrong extension, right claim
     await upload('noextension', Buffer.from('%PDF-1.4 x'), 'application/pdf').expect(400);
+  });
+
+  describe('New Zealand market', () => {
+    let nzMgrT: string, nzAdminT: string, nzBranchId: string, nzOrgId: string;
+    const wallClock = (d: Date, tz: string) => new Intl.DateTimeFormat('en-GB', { timeZone: tz, hour: '2-digit', minute: '2-digit', hour12: false }).format(d);
+
+    it('publishes the market definitions without signing in', async () => {
+      const m = (await api().get('/markets').expect(200)).body;
+      expect(m.default).toBe('NZ');
+      const nz = m.markets.find((x: any) => x.code === 'NZ');
+      expect(nz).toMatchObject({ currency: 'NZD', timezone: 'Pacific/Auckland', taxName: 'GST', taxRatePercent: 15, accountingTaxType: 'No GST' });
+      expect(nz.extraMandatoryDocs).toContain('PRACTISING_CERTIFICATE');
+      expect(nz.docLabels.DBS_POLICE_CHECK).toMatch(/Police vetting/);
+      expect(m.markets.find((x: any) => x.code === 'GB')).toMatchObject({ currency: 'GBP', timezone: 'Europe/London' });
+    });
+
+    it('new organizations default to New Zealand and existing UK ones keep their market', async () => {
+      const out = await createOrganization(prisma as any, {
+        orgName: 'Aotearoa Pharmacies', adminEmail: 'admin@aotearoa.test', phone: '+64 9 555 0000', branchName: 'Queen Street', branchCode: 'AOT-01',
+        addressLine1: '1 Queen Street', city: 'Auckland', postcode: '1010', managerEmail: 'mgr@aotearoa.test',
+      });
+      nzOrgId = out.organizationId; nzBranchId = out.branchId;
+      const org = await prisma.organization.findUnique({ where: { id: nzOrgId } });
+      expect(org).toMatchObject({ country: 'NZ', currency: 'NZD', timezone: 'Pacific/Auckland' });
+      expect((await prisma.facilityBranch.findUnique({ where: { id: nzBranchId } })).country).toBe('NZ');
+      expect(await prisma.organization.findUnique({ where: { id: apexId } })).toMatchObject({ country: 'GB', currency: 'GBP' });
+
+      const signIn = async (email: string) => {
+        const u = out.users.find((x) => x.email === email);
+        const temp = await login(email, u.temporaryPassword);
+        return (await post(temp, '/auth/change-password', { currentPassword: u.temporaryPassword, newPassword: 'AotearoaPass123!' }).expect(200)).body.accessToken as string;
+      };
+      nzMgrT = await signIn('mgr@aotearoa.test');
+      nzAdminT = await signIn('admin@aotearoa.test');
+      await expect(createOrganization(prisma as any, { orgName: 'Bad Market Co', adminEmail: 'a@bad.test', phone: '1', branchName: 'b', branchCode: 'BM-1', addressLine1: 'a', city: 'c', postcode: 'p', marketCode: 'FR' })).rejects.toThrow(/Unknown market/);
+    });
+
+    it('shifts carry their organization\'s currency, so each side sees the right symbol', async () => {
+      const nz = (await post(nzMgrT, '/shifts', { branchId: nzBranchId, title: 'Auckland cover', startTime: at(80, 9), endTime: at(80, 17), hourlyRate: 45, visibility: 'PUBLIC_MARKETPLACE', instantBookEnabled: true }).expect(201)).body;
+      expect(nz.currency).toBe('NZD');
+      const gb = (await newShift(richmondT, { startTime: at(81, 9), endTime: at(81, 17) }).expect(201)).body;
+      expect(gb.currency).toBe('GBP');
+      // a worker sees each shift in its own currency in the feed
+      const feed = (await get(davidT, '/shifts/feed').expect(200)).body;
+      expect(feed.find((x: any) => x.id === nz.id)?.currency).toBe('NZD');
+      expect(feed.find((x: any) => x.id === gb.id)?.currency).toBe('GBP');
+    });
+
+    it('requires the NZ practising certificate on top of the four everyone needs', async () => {
+      const shift = (await post(nzMgrT, '/shifts', { branchId: nzBranchId, title: 'Certificate rule', startTime: at(82, 9), endTime: at(82, 17), hourlyRate: 45, visibility: 'PUBLIC_MARKETPLACE', instantBookEnabled: true }).expect(201)).body;
+      // David holds the four base documents (verified) but no practising certificate
+      const blocked = await post(davidT, `/shifts/${shift.id}/instant-book`).expect(403);
+      expect(JSON.stringify(blocked.body)).toMatch(/PRACTISING_CERTIFICATE/);
+      expect(JSON.stringify(blocked.body)).not.toMatch(/IDENTITY|RIGHT_TO_WORK|INDEMNITY/);
+      // the same worker can still take a UK shift: that market does not need it
+      const uk = (await newShift(richmondT, { instantBookEnabled: true, startTime: at(83, 9), endTime: at(83, 17) }).expect(201)).body;
+      await post(davidT, `/shifts/${uk.id}/instant-book`).expect(201);
+      // once a manager verifies a certificate, the NZ shift is bookable
+      await prisma.complianceDocument.create({ data: { reliefWorkerId: davidId, type: 'PRACTISING_CERTIFICATE', fileUrl: 'seed/apc.pdf', status: 'VERIFIED', verifiedAt: new Date(), expiresAt: new Date(Date.now() + 300 * DAY) } });
+      await post(davidT, `/shifts/${shift.id}/instant-book`).expect(201);
+    });
+
+    it('uses the organization\'s currency in notification wording and on the invoice', async () => {
+      const shift = (await post(nzMgrT, '/shifts', { branchId: nzBranchId, title: 'Currency wording', startTime: at(84, 9), endTime: at(84, 17), hourlyRate: 45, visibility: 'PUBLIC_MARKETPLACE' }).expect(201)).body;
+      await post(davidT, '/negotiations', { shiftId: shift.id, proposedHourlyRate: 52.5 }).expect(201);
+      const note = (await get(nzMgrT, '/notifications').expect(200)).body.items.find((n: any) => n.type === 'NEGOTIATION_PROPOSED');
+      expect(note.body).toContain('$52.50/h');
+      expect(note.body).not.toContain('£');
+
+      // a finished NZ shift -> timesheet -> invoice in NZD
+      const start = new Date(Date.now() - 9 * 3_600_000), end = new Date(Date.now() - 3_600_000);
+      const done = await prisma.shift.create({ data: { branchId: nzBranchId, title: 'Finished NZ shift', startTime: start, endTime: end, hourlyRate: 40, totalEstimatedPay: 320, currency: 'NZD', status: 'BOOKED', assignedWorkerId: davidId, visibility: 'PUBLIC_MARKETPLACE', requiredSystems: [], requiredAccreditations: [] } });
+      const ts = (await post(davidT, '/timesheets/submit', { shiftId: done.id, clockInTime: start.toISOString(), clockOutTime: end.toISOString() }).expect(201)).body;
+      const inv = (await patch(nzMgrT, `/timesheets/${ts.id}/approve`).expect(200)).body.invoice;
+      expect(inv.currency).toBe('NZD');
+      // the accounting export defaults to the NZ tax setting and states the currency
+      const csv = (await get(nzAdminT, `/invoices/organization/${nzOrgId}/accounting.csv`).expect(200)).text;
+      expect(csv).toContain('"No GST","NZD"');
+      expect((await get(adminT, `/invoices/organization/${apexId}/accounting.csv`).expect(200)).text).not.toContain('"No GST"'); // UK default is "No VAT"
+      expect((await get(nzAdminT, '/analytics/overview').expect(200)).body.currency).toBe('NZD');
+      expect((await get(adminT, '/analytics/overview').expect(200)).body.currency).toBe('GBP');
+    });
+
+    it('lets an org admin change the market, applying its currency and timezone (existing shifts keep theirs)', async () => {
+      await patch(nzAdminT, `/organizations/${nzOrgId}`, { country: 'FR' }).expect(400);
+      const before = await prisma.shift.findFirst({ where: { branchId: nzBranchId } });
+      const uk = (await patch(nzAdminT, `/organizations/${nzOrgId}`, { country: 'GB' }).expect(200)).body;
+      expect(uk).toMatchObject({ country: 'GB', currency: 'GBP', timezone: 'Europe/London' });
+      expect((await prisma.shift.findUnique({ where: { id: before.id } })).currency).toBe('NZD');
+      const back = (await patch(nzAdminT, `/organizations/${nzOrgId}`, { country: 'NZ' }).expect(200)).body;
+      expect(back).toMatchObject({ country: 'NZ', currency: 'NZD', timezone: 'Pacific/Auckland' });
+    });
+
+    it('computes local working hours in the organization\'s timezone, across daylight saving', () => {
+      // NZDT (UTC+13) in January, NZST (UTC+12) in July, and the days around the 2026 changeovers
+      expect(zonedTime(new Date(Date.UTC(2027, 0, 12)), 9, 0, 'Pacific/Auckland').toISOString()).toBe('2027-01-11T20:00:00.000Z');
+      expect(zonedTime(new Date(Date.UTC(2026, 6, 15)), 9, 0, 'Pacific/Auckland').toISOString()).toBe('2026-07-14T21:00:00.000Z');
+      expect(zonedTime(new Date(Date.UTC(2026, 8, 26)), 17, 30, 'Pacific/Auckland').toISOString()).toBe('2026-09-26T05:30:00.000Z'); // last day of NZST
+      expect(zonedTime(new Date(Date.UTC(2026, 8, 28)), 9, 0, 'Pacific/Auckland').toISOString()).toBe('2026-09-27T20:00:00.000Z'); // first full NZDT day
+      expect(zonedTime(new Date(Date.UTC(2026, 2, 29)), 9, 0, 'Europe/London').toISOString()).toBe('2026-03-29T08:00:00.000Z'); // UK BST starts
+      expect(zonedTime(new Date(Date.UTC(2026, 9, 25)), 9, 0, 'Europe/London').toISOString()).toBe('2026-10-25T09:00:00.000Z'); // UK back to GMT
+      expect(zonedTime(new Date(Date.UTC(2026, 5, 1)), 12, 0, 'UTC').toISOString()).toBe('2026-06-01T12:00:00.000Z');
+    });
+
+    it('creates leave vacancies at 09:00-17:30 local time for each market', async () => {
+      const run = async (token: string, branchId: string, tz: string, name: string) => {
+        const leave = (await post(token, '/leave', { branchId, staffName: name, staffRole: 'Pharmacist', startDate: at(120, 0), endDate: at(121, 0) }).expect(201)).body;
+        await patch(token, `/leave/${leave.id}/review`, { status: 'APPROVED', autoCreateShiftVacancy: true }).expect(200);
+        const made = await prisma.shift.findMany({ where: { branchId, notes: { contains: name } }, orderBy: { startTime: 'asc' } });
+        expect(made.length).toBeGreaterThanOrEqual(2);
+        for (const sh of made) { expect(wallClock(sh.startTime, tz)).toBe('09:00'); expect(wallClock(sh.endTime, tz)).toBe('17:30'); }
+        return made[0];
+      };
+      const nz = await run(nzMgrT, nzBranchId, 'Pacific/Auckland', 'Nia NZ');
+      const uk = await run(richmondT, richmondId, 'Europe/London', 'Una UK');
+      expect(nz.currency).toBe('NZD');
+      expect(uk.currency).toBe('GBP');
+    });
+
+    it('records the market a worker registers in, defaulting to New Zealand', async () => {
+      const reg = (email: string, extra: object = {}) => api().post('/auth/register/relief-worker').send({ email, password: 'WorkerPass123!', firstName: 'A', lastName: 'B', phone: '+64 21 555 0100', registrationNumber: `REG-${email.slice(0, 6)}-${Date.now() % 1e6}`, ...extra });
+      const def = (await reg('nzdefault@worker.test').expect(201)).body;
+      expect(def.user.reliefProfile.country).toBe('NZ');
+      const gb = (await reg('gbworker@worker.test', { country: 'GB' }).expect(201)).body;
+      expect(gb.user.reliefProfile.country).toBe('GB');
+      await reg('badworker@worker.test', { country: 'XX' }).expect(400);
+      const tok = def.accessToken;
+      expect((await patch(tok, '/relief-workers/me/preferences', { country: 'GB' }).expect(200)).body.country).toBe('GB');
+    });
   });
 });

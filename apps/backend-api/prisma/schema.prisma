@@ -24,6 +24,7 @@ enum DocType {
   INDEMNITY_INSURANCE
   SAFEGUARDING_L3
   PRACTICE_DECLARATION
+  PRACTISING_CERTIFICATE
   MANDATORY_TRAINING
   OTHER
 }
@@ -109,6 +110,10 @@ model Organization {
   code             String            @unique
   logoUrl          String?
   subscriptionTier String            @default("ENTERPRISE")
+  // Market drives currency, timezone, tax defaults and credential rules (see src/common/markets.ts).
+  country          String            @default("NZ")
+  currency         String            @default("NZD")
+  timezone         String            @default("Pacific/Auckland")
   billingEmail     String
   phone            String
   isActive         Boolean           @default(true)
@@ -133,7 +138,7 @@ model FacilityBranch {
   addressLine2    String?
   city            String
   postcode        String
-  country         String            @default("UK")
+  country         String            @default("NZ")
   phone           String
   email           String?
   managerId       String?           @unique
@@ -189,6 +194,7 @@ model ReliefProfile {
   university               String?
   graduationYear           Int?
   skilledWorkerVisa        Boolean                 @default(false)
+  country                  String                  @default("NZ") // where they are registered: drives registration labels
   systemTags               String[]                // e.g. ["ProScript", "Columbus", "Nexphase"]
   accreditations           String[]                // e.g. ["CPCS", "Flu Vaccination", "Safeguarding L3", "NMS"]
   isVerified               Boolean                 @default(false)
@@ -263,6 +269,7 @@ model Shift {
   isEmergency           Boolean             @default(false)
   // Tiered cascade: 1 = Tier 1 only, 2 = Tier 1-2, 3 = whole staff bank. Marketplace release flips visibility.
   cascadeStage          Int                 @default(3)
+  currency              String              @default("NZD")
   // True for staff-bank shifts that cascade by timer; lets a released shift resume where it left off.
   cascadeEnabled        Boolean             @default(false)
   nextCascadeAt         DateTime?
@@ -344,7 +351,7 @@ model Invoice {
   timesheetId        String?       @unique
   timesheet          Timesheet?    @relation(fields: [timesheetId], references: [id], onDelete: SetNull)
   totalAmount        Decimal       @db.Decimal(10, 2)
-  currency           String        @default("GBP")
+  currency           String        @default("NZD")
   status             InvoiceStatus @default(DRAFT)
   issuedAt           DateTime      @default(now())
   dueAt              DateTime?

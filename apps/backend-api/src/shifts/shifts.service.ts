@@ -30,7 +30,8 @@ export class ShiftsService {
   ) {}
 
   async create(user: AuthUser, dto: CreateShiftDto) {
-    await this.access.assertBranch(user, dto.branchId);
+    const branch = await this.access.assertBranch(user, dto.branchId);
+    const org = await this.prisma.organization.findUniqueOrThrow({ where: { id: branch.organizationId }, select: { currency: true } });
     const start = new Date(dto.startTime);
     const end = new Date(dto.endTime);
     if (end <= start) throw new BadRequestException('End time must be after start time');
@@ -43,6 +44,7 @@ export class ShiftsService {
       data: {
         cascadeStage: cascading ? 1 : 3,
         cascadeEnabled: cascading,
+        currency: org.currency,
         nextCascadeAt: cascading ? new Date(Date.now() + CASCADE_DELAY_MINUTES * 60_000) : null,
         branchId: dto.branchId,
         title: dto.title,

@@ -3,6 +3,7 @@ import {
   IsArray, IsBoolean, IsDateString, IsEmail, IsEnum, IsIn, IsInt, IsNumber, IsOptional, IsString, Max, MaxLength, Min, MinLength, ValidateIf,
 } from 'class-validator';
 import { DocStatus, DocType } from '@prisma/client';
+import { MARKET_CODES } from '../../common/markets';
 
 const toBool = ({ value }: { value: unknown }) => (value === 'true' ? true : value === 'false' ? false : value);
 
@@ -26,6 +27,7 @@ export class ConciergeWorkerDto {
   @IsString() @MinLength(5) @MaxLength(25) phone: string;
   @IsString() @MinLength(3) @MaxLength(30) registrationNumber: string;
   @IsOptional() @IsString() @MaxLength(60) profession?: string;
+  @IsOptional() @IsIn(MARKET_CODES) country?: string;
   @IsOptional() @IsNumber() @Min(0) @Max(1000) hourlyRate?: number;
   @IsOptional() @IsNumber() @Min(0) @Max(1000) minimumShiftRate?: number;
   @IsOptional() @IsArray() @IsString({ each: true }) systemTags?: string[];
@@ -54,6 +56,7 @@ export class DocumentQueueQueryDto {
 }
 
 export class UpdatePreferencesDto {
+  @IsOptional() @IsIn(MARKET_CODES) country?: string;
   /** null removes the threshold / standard rate. */
   @ValidateIf((o) => o.minimumShiftRate !== undefined && o.minimumShiftRate !== null) @IsNumber() @Min(0) @Max(1000)
   minimumShiftRate?: number | null;

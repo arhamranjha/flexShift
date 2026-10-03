@@ -1,5 +1,6 @@
 import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { DocStatus, DocType, Prisma, ShiftVisibility, StaffBankTier } from '@prisma/client';
+import { marketFor } from '../common/markets';
 
 export const MANDATORY_DOCS: DocType[] = [
   DocType.IDENTITY,
@@ -89,7 +90,7 @@ export async function assertWorkerCanBook(
 ) {
   const shift = await client.shift.findUnique({
     where: { id: shiftId },
-    include: { branch: { include: { organization: { select: { requiredDocTypes: true } } } } },
+    include: { branch: { include: { organization: { select: { requiredDocTypes: true, country: true } } } } },
   });
   if (!shift) throw new NotFoundException('Shift not found');
 
@@ -106,7 +107,8 @@ export async function assertWorkerCanBook(
 
   const problems = eligibilityProblems(shift, worker, {
     skipSkills: opts.skipSkills,
-    extraDocs: shift.branch.organization?.requiredDocTypes ?? [],
+    // The market's own credentials (e.g. NZ practising certificate) plus anything the organization adds.
+    extraDocs: [...marketFor(shift.branch.organization?.country).extraMandatoryDocs, ...(shift.branch.organization?.requiredDocTypes ?? [])],
   });
   if (problems.length) {
     throw new ForbiddenException({

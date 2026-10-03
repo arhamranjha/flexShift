@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Prisma, Role, ShiftVisibility } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { MailerService } from './mailer.service';
+import { formatMoney } from '../common/markets';
 
 export interface NotificationInput {
   type: string;
@@ -115,7 +116,7 @@ export class NotificationsService {
   }
 
   /** Staff-bank members whose tier has just been released to this shift. */
-  async notifyTierMembers(shift: { id: string; title: string; branchId: string; hourlyRate: unknown }, stage: number) {
+  async notifyTierMembers(shift: { id: string; title: string; branchId: string; hourlyRate: unknown; currency?: string }, stage: number) {
     const branch = await this.prisma.facilityBranch.findUnique({ where: { id: shift.branchId }, select: { organizationId: true } });
     if (!branch) return;
     const members = await this.prisma.staffBankMember.findMany({
@@ -126,13 +127,13 @@ export class NotificationsService {
     await this.notifyUsers(ids, {
       type: 'NEW_SHIFT',
       title: 'New shift for your staff bank tier',
-      body: `${shift.title} at £${Number(shift.hourlyRate).toFixed(2)}/h`,
+      body: `${shift.title} at ${formatMoney(shift.hourlyRate as number, shift.currency)}/h`,
       link: `/shifts/${shift.id}`,
     });
   }
 
   /** Verified workers of the right profession whose minimum rate threshold this shift meets. */
-  async notifyRateMatches(shift: { id: string; title: string; roleRequired: string; hourlyRate: unknown; visibility: ShiftVisibility }) {
+  async notifyRateMatches(shift: { id: string; title: string; roleRequired: string; hourlyRate: unknown; visibility: ShiftVisibility; currency?: string }) {
     if (shift.visibility === ShiftVisibility.STAFF_BANK_ONLY) return;
     const userIds = await this.workerUserIds({
       isVerified: true,
@@ -143,7 +144,7 @@ export class NotificationsService {
     await this.notifyUsers(userIds, {
       type: 'SHIFT_MATCH',
       title: 'A shift meets your minimum rate',
-      body: `${shift.title} at £${Number(shift.hourlyRate).toFixed(2)}/h`,
+      body: `${shift.title} at ${formatMoney(shift.hourlyRate as number, shift.currency)}/h`,
       link: `/shifts/${shift.id}`,
     });
   }
@@ -152,12 +153,12 @@ export class NotificationsService {
    * Emergency broadcasts ignore minimum-rate thresholds: every verified, active worker of the right
    * profession is told straight away.
    */
-  async notifyEmergency(shift: { id: string; title: string; roleRequired: string; hourlyRate: unknown }) {
+  async notifyEmergency(shift: { id: string; title: string; roleRequired: string; hourlyRate: unknown; currency?: string }) {
     const userIds = await this.workerUserIds({ isVerified: true, profession: shift.roleRequired, user: { isActive: true } });
     await this.notifyUsers(userIds, {
       type: 'EMERGENCY_SHIFT',
       title: 'Emergency shift needs cover',
-      body: `${shift.title} at £${Number(shift.hourlyRate).toFixed(2)}/h`,
+      body: `${shift.title} at ${formatMoney(shift.hourlyRate as number, shift.currency)}/h`,
       link: `/shifts/${shift.id}`,
     });
   }

@@ -9,6 +9,7 @@ import { isVisibleToWorker } from '../shifts/eligibility';
 import { recomputeVerified } from './verification';
 import { NotificationsService } from '../notifications/notifications.service';
 import { generateTempPassword } from '../users/users.service';
+import { DEFAULT_MARKET } from '../common/markets';
 import {
   ConciergeWorkerDto, DocumentQueueQueryDto, UpdatePreferencesDto, UploadDocumentDto, VerifyDocumentDto, WorkerQueryDto,
 } from './dto/relief-worker.dto';
@@ -112,6 +113,10 @@ export class ReliefWorkersService {
     const existing = await this.prisma.user.findUnique({ where: { email: data.email } });
     if (existing) throw new ConflictException('Email already registered');
 
+    // A worker onboarded by an organization defaults to that organization's market.
+    const orgCountry = user.organizationId
+      ? ((await this.prisma.organization.findUnique({ where: { id: user.organizationId }, select: { country: true } }))?.country ?? DEFAULT_MARKET)
+      : DEFAULT_MARKET;
     const temporaryPassword = generateTempPassword();
     const passwordHash = await bcrypt.hash(temporaryPassword, 10);
     const { email, ...profile } = data;
@@ -126,6 +131,7 @@ export class ReliefWorkersService {
           createdByOrganizationId: user.organizationId ?? null,
           ...profile,
           profession: profile.profession || 'Pharmacist',
+          country: profile.country ?? orgCountry,
           systemTags: profile.systemTags || [],
           accreditations: profile.accreditations || [],
         },

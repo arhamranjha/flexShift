@@ -6,6 +6,7 @@
  */
 import { PrismaClient, Role } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
+import { marketFor } from '../common/markets';
 import { randomBytes } from 'crypto';
 
 export interface CreateOrgInput {
@@ -24,6 +25,8 @@ export interface CreateOrgInput {
   branchPhone?: string;
   /** Optional branch manager (FACILITY_MANAGER) for the first branch. */
   managerEmail?: string;
+  /** Market: NZ (default) or GB. Sets the organization's currency and timezone. */
+  marketCode?: string;
 }
 
 export interface CreatedUser {
@@ -49,6 +52,8 @@ export async function createOrganization(prisma: PrismaClient, input: CreateOrgI
   }
   if (managerEmail && managerEmail === adminEmail) throw new Error('The manager and the admin must be different people');
 
+  const market = marketFor(input.marketCode);
+  if (input.marketCode && market.code !== input.marketCode.toUpperCase()) throw new Error(`Unknown market ${input.marketCode} (use NZ or GB)`);
   const slug = slugify(orgName);
   if (!slug) throw new Error('orgName must contain letters or digits');
   const branchCode = need(input.branchCode, 'branchCode').toUpperCase();
@@ -73,6 +78,9 @@ export async function createOrganization(prisma: PrismaClient, input: CreateOrgI
         name: orgName,
         slug,
         code,
+        country: market.code,
+        currency: market.currency,
+        timezone: market.timezone,
         billingEmail: (input.billingEmail?.trim() || adminEmail).toLowerCase(),
         phone: need(input.phone, 'phone'),
       },
@@ -88,7 +96,7 @@ export async function createOrganization(prisma: PrismaClient, input: CreateOrgI
         addressLine2: input.addressLine2?.trim() || undefined,
         city: need(input.city, 'city'),
         postcode: need(input.postcode, 'postcode'),
-        country: input.country?.trim() || 'NZ',
+        country: input.country?.trim() || market.code,
         phone: (input.branchPhone || input.phone).trim(),
         managerId: manager?.id,
       },

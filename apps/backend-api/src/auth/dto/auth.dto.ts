@@ -1,5 +1,6 @@
 import { Transform } from 'class-transformer';
-import { IsArray, IsEmail, IsNumber, IsOptional, IsString, Max, MaxLength, Min, MinLength } from 'class-validator';
+import { IsArray, IsEmail, IsIn, IsNumber, IsOptional, IsString, Max, MaxLength, Min, MinLength } from 'class-validator';
+import { MARKET_CODES } from '../../common/markets';
 
 const trim = ({ value }: { value: unknown }) => (typeof value === 'string' ? value.trim() : value);
 
@@ -32,6 +33,10 @@ export class RegisterReliefWorkerDto {
 
   @IsOptional() @IsString() @MaxLength(60)
   profession?: string;
+
+  /** Where the worker is registered (selects registration wording); defaults to the platform default market. */
+  @IsOptional() @IsIn(MARKET_CODES)
+  country?: string;
 
   @IsOptional() @IsNumber() @Min(0) @Max(1000)
   hourlyRate?: number;

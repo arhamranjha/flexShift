@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { PrismaService } from '../prisma/prisma.service';
 import { InvoiceStatus } from '@prisma/client';
 import { AccessService, AuthUser } from '../common/access.service';
+import { marketFor } from '../common/markets';
 import { NotificationsService } from '../notifications/notifications.service';
 
 const csvCell = (v: unknown) => {
@@ -101,6 +102,8 @@ export class InvoicesService {
       const t = i.issuedAt.getTime();
       return (!opts.from || t >= new Date(opts.from).getTime()) && (!opts.to || t <= new Date(opts.to).getTime() + 86_399_999);
     });
+    const org = await this.prisma.organization.findUniqueOrThrow({ where: { id: organizationId }, select: { country: true } });
+    const market = marketFor(org.country);
     const header = ['*ContactName', '*InvoiceNumber', 'Reference', '*InvoiceDate', '*DueDate', 'Description', '*Quantity', '*UnitAmount', '*AccountCode', '*TaxType', 'Currency'];
     const rows = invoices.map((i) => {
       const ts = i.timesheet;
@@ -117,7 +120,7 @@ export class InvoicesService {
         hours.toFixed(2),
         rate.toFixed(2),
         opts.accountCode ?? '310',
-        opts.taxType ?? 'No VAT',
+        opts.taxType ?? market.accountingTaxType,
         i.currency,
       ];
     });
