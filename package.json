@@ -6,9 +6,17 @@
     "dev:backend": "pnpm --filter backend-api start:dev",
     "build:backend": "pnpm --filter backend-api build",
     "prisma:generate": "pnpm --filter backend-api prisma:generate",
-    "prisma:migrate": "pnpm --filter backend-api prisma:migrate"
+    "prisma:migrate": "pnpm --filter backend-api prisma:migrate",
+    "dev:web": "pnpm --filter web-admin dev",
+    "dev:portal": "pnpm --filter worker-portal dev",
+    "test:backend": "pnpm --filter backend-api test",
+    "lint": "eslint . && pnpm -r lint"
   },
   "devDependencies": {
-    "typescript": "^5.4.5"
-  }
+    "eslint": "^10.11.0",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "typescript": "^5.4.5",
+    "typescript-eslint": "^8.71.0"
+  },
+  "packageManager": "pnpm@11.25.0"
 }

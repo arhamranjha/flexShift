@@ -1,26 +1,31 @@
-import { Injectable, NotFoundException, BadRequestException, ConflictException, ForbiddenException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, ConflictException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { DocStatus, DocType, Prisma, Role, ShiftVisibility } from '@prisma/client';
+import { DocStatus, Prisma, Role } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
+import { extname } from 'path';
 import { AccessService, AuthUser } from '../common/access.service';
 import { StorageService } from '../storage/storage.service';
-import { MANDATORY_DOCS, isVisibleToWorker } from '../shifts/eligibility';
+import { isVisibleToWorker } from '../shifts/eligibility';
+import { recomputeVerified } from './verification';
+import { NotificationsService } from '../notifications/notifications.service';
 import { generateTempPassword } from '../users/users.service';
+import { DEFAULT_MARKET } from '../common/markets';
 import {
   ConciergeWorkerDto, DocumentQueueQueryDto, UpdatePreferencesDto, UploadDocumentDto, VerifyDocumentDto, WorkerQueryDto,
 } from './dto/relief-worker.dto';
 
-/** Checks the file's magic bytes against its declared type (the client-supplied mimetype is not trusted). */
-function assertFileSignature(file: { buffer: Buffer; originalname: string; mimetype: string }) {
+/**
+ * The file's extension says what it claims to be and its first bytes must agree. The browser-reported mimetype is
+ * ignored: it comes from the user's OS registry and can be blank or wrong for perfectly good files.
+ */
+function assertFileSignature(file: { buffer: Buffer; originalname: string }) {
+  const ext = extname(file.originalname).toLowerCase();
   const b = file.buffer;
-  const isPdf = b.subarray(0, 5).toString('latin1') === '%PDF-';
-  const isPng = b.subarray(0, 4).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47]));
-  const isJpg = b.subarray(0, 3).equals(Buffer.from([0xff, 0xd8, 0xff]));
   const ok =
-    (file.mimetype === 'application/pdf' && isPdf) ||
-    (file.mimetype === 'image/png' && isPng) ||
-    (file.mimetype === 'image/jpeg' && isJpg);
-  if (!ok) throw new BadRequestException('File content does not match its declared type (PDF, PNG or JPEG only)');
+    (ext === '.pdf' && b.subarray(0, 5).toString('latin1') === '%PDF-') ||
+    (ext === '.png' && b.subarray(0, 4).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47]))) ||
+    ((ext === '.jpg' || ext === '.jpeg') && b.subarray(0, 3).equals(Buffer.from([0xff, 0xd8, 0xff])));
+  if (!ok) throw new BadRequestException('File content does not match its type (PDF, PNG or JPEG only)');
 }
 
 @Injectable()
@@ -29,6 +34,7 @@ export class ReliefWorkersService {
     private prisma: PrismaService,
     private access: AccessService,
     private storage: StorageService,
+    private notifications: NotificationsService,
   ) {}
 
   async findAll(user: AuthUser, query: WorkerQueryDto) {
@@ -107,6 +113,10 @@ export class ReliefWorkersService {
     const existing = await this.prisma.user.findUnique({ where: { email: data.email } });
     if (existing) throw new ConflictException('Email already registered');
 
+    // A worker onboarded by an organization defaults to that organization's market.
+    const orgCountry = user.organizationId
+      ? ((await this.prisma.organization.findUnique({ where: { id: user.organizationId }, select: { country: true } }))?.country ?? DEFAULT_MARKET)
+      : DEFAULT_MARKET;
     const temporaryPassword = generateTempPassword();
     const passwordHash = await bcrypt.hash(temporaryPassword, 10);
     const { email, ...profile } = data;
@@ -121,6 +131,7 @@ export class ReliefWorkersService {
           createdByOrganizationId: user.organizationId ?? null,
           ...profile,
           profession: profile.profession || 'Pharmacist',
+          country: profile.country ?? orgCountry,
           systemTags: profile.systemTags || [],
           accreditations: profile.accreditations || [],
         },
@@ -202,21 +213,17 @@ export class ReliefWorkersService {
         },
         include: { reliefWorker: true },
       });
-      await this.recomputeVerified(tx, doc.reliefWorkerId);
+      await recomputeVerified(tx, doc.reliefWorkerId);
+      return doc;
+    }).then(async (doc) => {
+      await this.notifications.notifyWorker(doc.reliefWorkerId, {
+        type: dto.status === 'VERIFIED' ? 'DOCUMENT_VERIFIED' : 'DOCUMENT_REJECTED',
+        title: dto.status === 'VERIFIED' ? 'Document verified' : 'Document rejected',
+        body: dto.status === 'REJECTED' ? `${doc.type}: ${dto.notes}` : doc.type,
+        link: '/profile',
+      });
       return doc;
     });
-  }
-
-  /** A worker is "verified" when every mandatory document type is VERIFIED and unexpired. */
-  async recomputeVerified(tx: Prisma.TransactionClient, workerId: string) {
-    const docs = await tx.complianceDocument.findMany({
-      where: { reliefWorkerId: workerId, status: DocStatus.VERIFIED },
-    });
-    const now = Date.now();
-    const valid = new Set(docs.filter((d) => !d.expiresAt || d.expiresAt.getTime() > now).map((d) => d.type));
-    const isVerified = MANDATORY_DOCS.every((t) => valid.has(t));
-    await tx.reliefProfile.update({ where: { id: workerId }, data: { isVerified } });
-    return isVerified;
   }
 
   updatePreferences(workerId: string, data: UpdatePreferencesDto) {

@@ -24,6 +24,7 @@ enum DocType {
   INDEMNITY_INSURANCE
   SAFEGUARDING_L3
   PRACTICE_DECLARATION
+  PRACTISING_CERTIFICATE
   MANDATORY_TRAINING
   OTHER
 }
@@ -109,9 +110,15 @@ model Organization {
   code             String            @unique
   logoUrl          String?
   subscriptionTier String            @default("ENTERPRISE")
+  // Market drives currency, timezone, tax defaults and credential rules (see src/common/markets.ts).
+  country          String            @default("NZ")
+  currency         String            @default("NZD")
+  timezone         String            @default("Pacific/Auckland")
   billingEmail     String
   phone            String
   isActive         Boolean           @default(true)
+  // Extra credentials this organization insists on, on top of the platform-wide mandatory four.
+  requiredDocTypes DocType[]         @default([])
   createdAt        DateTime          @default(now())
   updatedAt        DateTime          @updatedAt
 
@@ -131,7 +138,7 @@ model FacilityBranch {
   addressLine2    String?
   city            String
   postcode        String
-  country         String            @default("UK")
+  country         String            @default("NZ")
   phone           String
   email           String?
   managerId       String?           @unique
@@ -156,6 +163,7 @@ model User {
   role           Role
   isActive       Boolean               @default(true)
   mustChangePassword Boolean           @default(false)
+  emailNotifications Boolean           @default(true)
   tokenVersion   Int                   @default(0)
   lastLoginAt    DateTime?
   createdAt      DateTime              @default(now())
@@ -166,6 +174,7 @@ model User {
   verifiedDocs   ComplianceDocument[]  @relation("DocumentVerifier")
   approvedTimesheets Timesheet[]       @relation("TimesheetApprover")
   reviewedLeaves LeaveRequest[]        @relation("LeaveReviewer")
+  notifications  Notification[]
 }
 
 model ReliefProfile {
@@ -185,6 +194,7 @@ model ReliefProfile {
   university               String?
   graduationYear           Int?
   skilledWorkerVisa        Boolean                 @default(false)
+  country                  String                  @default("NZ") // where they are registered: drives registration labels
   systemTags               String[]                // e.g. ["ProScript", "Columbus", "Nexphase"]
   accreditations           String[]                // e.g. ["CPCS", "Flu Vaccination", "Safeguarding L3", "NMS"]
   isVerified               Boolean                 @default(false)
@@ -217,6 +227,8 @@ model ComplianceDocument {
   verifiedById      String?
   verifiedBy        User?          @relation("DocumentVerifier", fields: [verifiedById], references: [id])
   verificationNotes String?
+  expiryNotified30  Boolean        @default(false)
+  expiryNotified7   Boolean        @default(false)
   createdAt         DateTime       @default(now())
   updatedAt         DateTime       @updatedAt
 }
@@ -255,6 +267,14 @@ model Shift {
   instantBookEnabled    Boolean             @default(false)
   isOvernight           Boolean             @default(false)
   isEmergency           Boolean             @default(false)
+  // Tiered cascade: 1 = Tier 1 only, 2 = Tier 1-2, 3 = whole staff bank. Marketplace release flips visibility.
+  cascadeStage          Int                 @default(3)
+  currency              String              @default("NZD")
+  // True for staff-bank shifts that cascade by timer; lets a released shift resume where it left off.
+  cascadeEnabled        Boolean             @default(false)
+  nextCascadeAt         DateTime?
+  // Set when the assigned worker clocks in from the portal; clock-out turns it into a timesheet.
+  workerClockInAt       DateTime?
   notes                 String?
   assignedWorkerId      String?
   assignedWorker        ReliefProfile?      @relation("AssignedReliefWorker", fields: [assignedWorkerId], references: [id], onDelete: SetNull)
@@ -331,7 +351,7 @@ model Invoice {
   timesheetId        String?       @unique
   timesheet          Timesheet?    @relation(fields: [timesheetId], references: [id], onDelete: SetNull)
   totalAmount        Decimal       @db.Decimal(10, 2)
-  currency           String        @default("GBP")
+  currency           String        @default("NZD")
   status             InvoiceStatus @default(DRAFT)
   issuedAt           DateTime      @default(now())
   dueAt              DateTime?
@@ -380,4 +400,18 @@ model WorkerFavouriteBranch {
   createdAt      DateTime       @default(now())
 
   @@unique([reliefWorkerId, branchId])
+}
+
+model Notification {
+  id        String    @id @default(uuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type      String
+  title     String
+  body      String?
+  link      String?
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId, readAt])
 }

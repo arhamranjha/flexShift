@@ -13,3 +13,6 @@ out/
 *.m4v
 coverage/
 uploads/
+*.tsbuildinfo
+next-env.d.ts
+deploy/.env

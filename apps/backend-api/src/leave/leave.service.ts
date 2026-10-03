@@ -1,8 +1,12 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { LeaveStatus, LeaveType, ShiftStatus, ShiftVisibility } from '@prisma/client';
+import { LeaveStatus, LeaveType, Prisma, ShiftStatus, ShiftVisibility } from '@prisma/client';
 import { AccessService, AuthUser } from '../common/access.service';
 import { SubmitLeaveDto } from './dto/leave.dto';
+import { zonedTime } from '../common/time';
+
+/** Canonical form of a person's name: Unicode-normalised, single spaces, trimmed. */
+const normalizeName = (name: string) => name.normalize('NFKC').replace(/\s+/g, ' ').trim();
 
 @Injectable()
 export class LeaveService {
@@ -24,21 +28,56 @@ export class LeaveService {
 
   async submitLeave(user: AuthUser, data: SubmitLeaveDto) {
     await this.access.assertBranch(user, data.branchId);
-    if (new Date(data.endDate) < new Date(data.startDate)) {
-      throw new BadRequestException('End date must not be before start date');
-    }
-    return this.prisma.leaveRequest.create({
-      data: {
-        branchId: data.branchId,
-        staffName: data.staffName,
-        staffRole: data.staffRole,
-        startDate: new Date(data.startDate),
-        endDate: new Date(data.endDate),
-        leaveType: data.leaveType || LeaveType.ANNUAL,
-        reason: data.reason,
-        status: LeaveStatus.PENDING,
+    const start = new Date(data.startDate);
+    const end = new Date(data.endDate);
+    if (end < start) throw new BadRequestException('End date must not be before start date');
+    const staffName = normalizeName(data.staffName);
+    if (!staffName) throw new BadRequestException('Staff name is required');
+    // The advisory lock serialises submissions for the same person, so two concurrent requests
+    // cannot both pass the overlap check.
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${data.branchId + ':' + staffName.toLowerCase()}))`;
+      await this.assertNoOverlap(data.branchId, staffName, start, end, undefined, undefined, tx);
+      return tx.leaveRequest.create({
+        data: {
+          branchId: data.branchId,
+          staffName,
+          staffRole: data.staffRole.trim(),
+          startDate: start,
+          endDate: end,
+          leaveType: data.leaveType || LeaveType.ANNUAL,
+          reason: data.reason,
+          status: LeaveStatus.PENDING,
+        },
+      });
+    });
+  }
+
+  /** The same person cannot have two overlapping pending/approved leave requests at a branch. */
+  private async assertNoOverlap(
+    branchId: string,
+    staffName: string,
+    start: Date,
+    end: Date,
+    excludeId?: string,
+    statuses: LeaveStatus[] = [LeaveStatus.PENDING, LeaveStatus.APPROVED],
+    client: Prisma.TransactionClient = this.prisma,
+  ) {
+    const clash = await client.leaveRequest.findFirst({
+      where: {
+        branchId,
+        staffName: { equals: normalizeName(staffName), mode: 'insensitive' },
+        status: { in: statuses },
+        startDate: { lte: end },
+        endDate: { gte: start },
+        ...(excludeId ? { id: { not: excludeId } } : {}),
       },
     });
+    if (clash) {
+      throw new ConflictException(
+        `${clash.staffName} already has ${clash.status.toLowerCase()} leave from ${clash.startDate.toISOString().slice(0, 10)} to ${clash.endDate.toISOString().slice(0, 10)}`,
+      );
+    }
   }
 
   async reviewLeave(
@@ -51,10 +90,14 @@ export class LeaveService {
     const reviewerUserId = user.id;
     const leave = await this.prisma.leaveRequest.findFirst({
       where: { id, branch: this.access.branchScope(user) },
+      include: { branch: { include: { organization: { select: { timezone: true, currency: true } } } } },
     });
     if (!leave) throw new NotFoundException('Leave request not found');
     if (leave.status !== LeaveStatus.PENDING) {
       throw new BadRequestException(`Leave request was already ${leave.status.toLowerCase()}`);
+    }
+    if (status === LeaveStatus.APPROVED) {
+      await this.assertNoOverlap(leave.branchId, leave.staffName, leave.startDate, leave.endDate, leave.id, [LeaveStatus.APPROVED]);
     }
 
     return this.prisma.$transaction(async (tx) => {
@@ -84,8 +127,8 @@ export class LeaveService {
           const last = Date.UTC(end.getUTCFullYear(), end.getUTCMonth(), end.getUTCDate());
           for (; day.getTime() <= last; day.setUTCDate(day.getUTCDate() + 1)) {
             windows.push({
-              start: new Date(day.getTime() + 9 * 3_600_000),
-              end: new Date(day.getTime() + 17.5 * 3_600_000),
+              start: zonedTime(day, 9, 0, leave.branch.organization.timezone),
+              end: zonedTime(day, 17, 30, leave.branch.organization.timezone),
             });
           }
         }
@@ -107,6 +150,7 @@ export class LeaveService {
               totalEstimatedPay: Number((hours * rate).toFixed(2)),
               visibility: ShiftVisibility.STAFF_BANK_ONLY,
               status: ShiftStatus.OPEN,
+              currency: leave.branch.organization.currency,
               notes: `Auto-generated backfill for ${leave.staffName} approved leave`,
             },
           });

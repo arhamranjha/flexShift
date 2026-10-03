@@ -4,6 +4,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import * as bcrypt from 'bcryptjs';
 import { Role } from '@prisma/client';
 import { RegisterReliefWorkerDto } from './dto/auth.dto';
+import { DEFAULT_MARKET } from '../common/markets';
 
 const DUMMY_HASH = bcrypt.hashSync('not-a-real-password', 10);
 
@@ -84,6 +85,7 @@ export class AuthService {
           phone: dto.phone,
           registrationNumber: dto.registrationNumber,
           profession: dto.profession || 'Pharmacist',
+          country: dto.country ?? DEFAULT_MARKET,
           hourlyRate: dto.hourlyRate,
           minimumShiftRate: dto.minimumShiftRate,
           systemTags: dto.systemTags || [],

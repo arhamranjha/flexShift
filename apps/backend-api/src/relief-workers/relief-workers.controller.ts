@@ -17,10 +17,12 @@ import {
 const STAFF = [Role.SUPER_ADMIN, Role.ORG_ADMIN, Role.FACILITY_MANAGER];
 const MIME: Record<string, string> = { '.pdf': 'application/pdf', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg' };
 
+// The type a browser reports comes from the user's OS and can be empty or wrong (some Windows machines), so the
+// extension decides what is accepted here and the service then verifies the actual bytes.
 const upload = FileInterceptor('file', {
   limits: { fileSize: 10 * 1024 * 1024, files: 1 },
   fileFilter: (_req, file, cb) =>
-    MIME[extname(file.originalname).toLowerCase()] === file.mimetype
+    MIME[extname(file.originalname).toLowerCase()]
       ? cb(null, true)
       : cb(new BadRequestException('Only PDF, PNG or JPEG documents are accepted'), false),
 });

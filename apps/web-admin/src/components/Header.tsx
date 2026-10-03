@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import type { ReactNode } from 'react';
 import { useAuth, useScope } from '@/lib/auth';
 import { label } from '@flexshift/ui';
+import { NotificationBell } from '@/components/NotificationBell';
 
 interface HeaderProps {
   title: string;
@@ -45,6 +46,7 @@ export function Header({ title, subtitle, actions, hideBranchPicker }: HeaderPro
             <span className="font-semibold text-slate-700">{orgName}</span>
           </div>
         )}
+        <NotificationBell />
         <div className="flex items-center gap-2.5 pl-3 border-l border-slate-200">
           <UserCircle2 className="w-7 h-7 text-slate-400" />
           <div className="text-left">

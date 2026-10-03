@@ -26,4 +26,7 @@ async function bootstrap() {
   console.log(`FlexShift Backend API is running on: http://localhost:${port}`);
   console.log(`Swagger Documentation available at: http://localhost:${port}/api/docs`);
 }
-bootstrap();
+bootstrap().catch((err) => {
+  console.error('FlexShift failed to start:', err);
+  process.exit(1);
+});

@@ -1,7 +1,11 @@
-import { PrismaClient, Role, DocType, DocStatus, ShiftStatus, ShiftVisibility, StaffBankTier, TimesheetStatus, InvoiceStatus, LeaveType, LeaveStatus } from '@prisma/client';
+import { PrismaClient, Role, DocType, DocStatus, ShiftStatus, ShiftVisibility, StaffBankTier } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
 
 const prisma = new PrismaClient();
+
+// The demo organizations are UK-based (the platform default for new organizations is NZ), which also shows that
+// several markets can live side by side.
+const UK_MARKET = { country: 'GB', currency: 'GBP', timezone: 'Europe/London' };
 
 const inDays = (n: number) => {
   const d = new Date();
@@ -17,7 +21,7 @@ async function main() {
   // 1. Create Organizations
   const apexHealth = await prisma.organization.upsert({
     where: { slug: 'apex-healthcare' },
-    update: {},
+    update: UK_MARKET,
     create: {
       name: 'Apex Healthcare Group',
       slug: 'apex-healthcare',
@@ -25,12 +29,13 @@ async function main() {
       billingEmail: 'billing@apexhealth.co.uk',
       phone: '+44 20 7946 0910',
       subscriptionTier: 'ENTERPRISE_UNLIMITED',
+      ...UK_MARKET,
     },
   });
 
   const crestPharmacy = await prisma.organization.upsert({
     where: { slug: 'crest-pharmacy' },
-    update: {},
+    update: UK_MARKET,
     create: {
       name: 'Crest Pharmacy Group',
       slug: 'crest-pharmacy',
@@ -38,6 +43,7 @@ async function main() {
       billingEmail: 'accounts@crestpharmacy.co.uk',
       phone: '+44 20 7946 0922',
       subscriptionTier: 'ENTERPRISE_PRO',
+      ...UK_MARKET,
     },
   });
 
@@ -164,6 +170,7 @@ async function main() {
       systemTags: ['ProScript', 'Columbus', 'Nexphase'],
       accreditations: ['CPCS', 'Flu Vaccination', 'Safeguarding Level 3', 'NMS'],
       isVerified: true,
+      country: 'GB',
     },
   });
 
@@ -198,6 +205,7 @@ async function main() {
       systemTags: ['ProScript', 'Columbus'],
       accreditations: ['CPCS', 'Independent Prescriber', 'Flu Vaccination', 'Safeguarding Level 3'],
       isVerified: true,
+      country: 'GB',
     },
   });
 
@@ -310,7 +318,7 @@ async function main() {
   const tomorrowEnd = new Date(tomorrow);
   tomorrowEnd.setHours(17, 30, 0, 0);
 
-  const shift1 = await prisma.shift.create({
+  await prisma.shift.create({
     data: {
       branchId: richmondBranch.id,
       title: 'Sole Charge Clinical Relief Pharmacist',
@@ -336,7 +344,7 @@ async function main() {
   nextWeekEnd.setDate(nextWeekEnd.getDate() + 1);
   nextWeekEnd.setHours(4, 30, 0, 0);
 
-  const shiftEmergency = await prisma.shift.create({
+  await prisma.shift.create({
     data: {
       branchId: beckenhamBranch.id,
       title: 'Emergency Overnight Relief Cover',
@@ -384,6 +392,10 @@ async function main() {
       },
     });
   }
+
+  // Shifts above were created without a currency: they belong to the UK organizations.
+  await prisma.shift.updateMany({ where: { branch: { organizationId: { in: [apexHealth.id, crestPharmacy.id] } } }, data: { currency: 'GBP' } });
+  await prisma.reliefProfile.updateMany({ where: { registrationNumber: { startsWith: 'GPHC' } }, data: { country: 'GB' } });
 
   console.log('FlexShift database seeded successfully!');
   console.log('Demo Credentials:');

@@ -2,8 +2,10 @@ import { Injectable, BadRequestException, ConflictException, NotFoundException }
 import { PrismaService } from '../prisma/prisma.service';
 import { TimesheetStatus, InvoiceStatus, ShiftStatus } from '@prisma/client';
 import { randomBytes } from 'crypto';
+import { formatMoney } from '../common/markets';
 import { AccessService, AuthUser } from '../common/access.service';
-import { SubmitTimesheetDto } from './dto/timesheet.dto';
+import { ClockInDto, ClockOutDto, SubmitTimesheetDto } from './dto/timesheet.dto';
+import { NotificationsService } from '../notifications/notifications.service';
 
 const MINUTE = 60_000;
 /** Clock-in may be up to 1h before the shift starts; clock-out up to 4h after it ends. */
@@ -15,6 +17,7 @@ export class TimesheetsService {
   constructor(
     private prisma: PrismaService,
     private access: AccessService,
+    private notifications: NotificationsService,
   ) {}
 
   async submitTimesheet(reliefWorkerId: string, dto: SubmitTimesheetDto) {
@@ -58,8 +61,8 @@ export class TimesheetsService {
     }
 
     const totalMinutes = (clockOut.getTime() - clockIn.getTime()) / (1000 * 60) - breakMins;
-    if (totalMinutes <= 0) {
-      throw new BadRequestException('Invalid duration after break deduction');
+    if (totalMinutes < 1) {
+      throw new BadRequestException('Worked time must be at least one minute after the break is deducted');
     }
 
     const billableHours = Number((totalMinutes / 60).toFixed(2));
@@ -80,17 +83,73 @@ export class TimesheetsService {
     // Re-submission is only allowed while the timesheet is still open; the status guard is part of
     // the UPDATE so a concurrent approval cannot be overwritten. First submission relies on the
     // unique shiftId (a racing duplicate surfaces as 409).
-    if (existingTs) {
-      const res = await this.prisma.timesheet.updateMany({
-        where: { shiftId: data.shiftId, status: { in: [TimesheetStatus.SUBMITTED, TimesheetStatus.PENDING_SUBMISSION, TimesheetStatus.DISPUTED] } },
-        data: values,
+    await this.prisma.$transaction(async (tx) => {
+      // Lock the shift row and re-check it: a manager cancelling or releasing the shift at the same
+      // moment must not leave an orphan timesheet behind.
+      await tx.$queryRaw`SELECT id FROM "Shift" WHERE id = ${data.shiftId} FOR UPDATE`;
+      const held = await tx.shift.count({
+        where: { id: data.shiftId, assignedWorkerId: data.reliefWorkerId, status: { in: [ShiftStatus.BOOKED, ShiftStatus.IN_PROGRESS] } },
       });
-      if (res.count === 0) throw new ConflictException('Timesheet was already processed');
-      return this.prisma.timesheet.findUnique({ where: { shiftId: data.shiftId }, include: { shift: true, branch: true } });
+      if (held === 0) throw new ConflictException('This shift is no longer assigned to you');
+
+      if (existingTs) {
+        const res = await tx.timesheet.updateMany({
+          where: { shiftId: data.shiftId, status: { in: [TimesheetStatus.SUBMITTED, TimesheetStatus.PENDING_SUBMISSION, TimesheetStatus.DISPUTED] } },
+          data: values,
+        });
+        if (res.count === 0) throw new ConflictException('Timesheet was already processed');
+      } else {
+        await tx.timesheet.create({
+          data: { shiftId: data.shiftId, reliefWorkerId: data.reliefWorkerId, branchId: shift.branchId, ...values },
+        });
+      }
+    });
+    await this.notifications.notifyBranchStaff(shift.branchId, {
+      type: 'TIMESHEET_SUBMITTED', title: 'Timesheet awaiting approval', body: shift.title, link: '/timesheets',
+    });
+    return this.prisma.timesheet.findUnique({ where: { shiftId: data.shiftId }, include: { shift: true, branch: true } });
+  }
+
+  /** Starts the shift: allowed from 1h before the start until the shift ends, once, for the assigned worker. */
+  async clockIn(reliefWorkerId: string, dto: ClockInDto) {
+    const shift = await this.prisma.shift.findUnique({ where: { id: dto.shiftId } });
+    if (!shift || shift.assignedWorkerId !== reliefWorkerId) throw new NotFoundException('Shift not found');
+    if (shift.status !== ShiftStatus.BOOKED) throw new BadRequestException(`You cannot clock in to a ${shift.status} shift`);
+    const now = Date.now();
+    if (now < shift.startTime.getTime() - EARLY_CLOCK_IN) throw new BadRequestException('Too early: you can clock in up to 1 hour before the start');
+    if (now > shift.endTime.getTime()) throw new BadRequestException('This shift has already ended: submit a timesheet instead');
+
+    const res = await this.prisma.shift.updateMany({
+      where: { id: dto.shiftId, assignedWorkerId: reliefWorkerId, status: ShiftStatus.BOOKED, workerClockInAt: null },
+      data: { status: ShiftStatus.IN_PROGRESS, workerClockInAt: new Date(now) },
+    });
+    if (res.count === 0) throw new ConflictException('You are already clocked in');
+    await this.notifications.notifyBranchStaff(shift.branchId, {
+      type: 'WORKER_CLOCKED_IN', title: 'Worker clocked in', body: shift.title, link: '/rota',
+    });
+    return this.prisma.shift.findUnique({ where: { id: dto.shiftId }, include: { branch: true } });
+  }
+
+  /** Ends the shift and submits the timesheet from the recorded clock-in to now. */
+  async clockOut(reliefWorkerId: string, dto: ClockOutDto) {
+    const shift = await this.prisma.shift.findUnique({ where: { id: dto.shiftId } });
+    if (!shift || shift.assignedWorkerId !== reliefWorkerId) throw new NotFoundException('Shift not found');
+    if (shift.status !== ShiftStatus.IN_PROGRESS || !shift.workerClockInAt) {
+      throw new BadRequestException('You are not clocked in to this shift');
     }
-    return this.prisma.timesheet.create({
-      data: { shiftId: data.shiftId, reliefWorkerId: data.reliefWorkerId, branchId: shift.branchId, ...values },
-      include: { shift: true, branch: true },
+    if (await this.prisma.timesheet.findUnique({ where: { shiftId: dto.shiftId }, select: { id: true } })) {
+      throw new ConflictException('A timesheet has already been submitted for this shift');
+    }
+    // Billing starts at the scheduled start (clocking in early is not paid) and a very late clock-out is
+    // capped at the allowed overrun instead of being rejected, so the worker is never left stuck IN_PROGRESS.
+    const clockIn = Math.max(shift.workerClockInAt.getTime(), shift.startTime.getTime());
+    const clockOut = Math.min(Date.now(), shift.endTime.getTime() + LATE_CLOCK_OUT);
+    return this.submitTimesheet(reliefWorkerId, {
+      shiftId: dto.shiftId,
+      clockInTime: new Date(clockIn).toISOString(),
+      clockOutTime: new Date(clockOut).toISOString(),
+      breakMinutes: dto.breakMinutes,
+      notes: dto.notes,
     });
   }
 
@@ -105,7 +164,7 @@ export class TimesheetsService {
       throw new BadRequestException(`Only submitted timesheets can be approved (current: ${ts.status})`);
     }
 
-    return this.prisma.$transaction(async (tx) => {
+    const result = await this.prisma.$transaction(async (tx) => {
       const res = await tx.timesheet.updateMany({
         where: { id: timesheetId, status: TimesheetStatus.SUBMITTED },
         data: {
@@ -140,6 +199,7 @@ export class TimesheetsService {
           reliefWorkerId: ts.reliefWorkerId,
           timesheetId: ts.id,
           totalAmount: ts.totalPayout,
+          currency: ts.shift.currency,
           status: InvoiceStatus.ISSUED,
           dueAt: dueDate,
         },
@@ -147,6 +207,10 @@ export class TimesheetsService {
 
       return { timesheet: updatedTs, invoice };
     });
+    await this.notifications.notifyWorker(ts.reliefWorkerId, {
+      type: 'TIMESHEET_APPROVED', title: 'Timesheet approved: invoice issued', body: `${result.invoice.invoiceNumber} · ${formatMoney(result.invoice.totalAmount, result.invoice.currency)}`, link: '/finance',
+    });
+    return result;
   }
 
   async findByBranch(user: AuthUser, branchId: string, status?: TimesheetStatus) {

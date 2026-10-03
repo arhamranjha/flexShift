@@ -2,6 +2,8 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { PrismaService } from '../prisma/prisma.service';
 import { InvoiceStatus } from '@prisma/client';
 import { AccessService, AuthUser } from '../common/access.service';
+import { marketFor } from '../common/markets';
+import { NotificationsService } from '../notifications/notifications.service';
 
 const csvCell = (v: unknown) => {
   let s = String(v ?? '');
@@ -15,6 +17,7 @@ export class InvoicesService {
   constructor(
     private prisma: PrismaService,
     private access: AccessService,
+    private notifications: NotificationsService,
   ) {}
 
   async findByOrganization(user: AuthUser, organizationId: string, status?: InvoiceStatus) {
@@ -40,10 +43,18 @@ export class InvoicesService {
       orderBy: { issuedAt: 'desc' },
     });
 
-    const sum = (status: InvoiceStatus) =>
-      invoices.filter((i) => i.status === status).reduce((acc, i) => acc + Number(i.totalAmount), 0);
-
-    return { totalEarned: sum(InvoiceStatus.PAID), pendingPayout: sum(InvoiceStatus.ISSUED), invoices };
+    // Totals never mix currencies: one line per currency. The single-number fields are only set when there is one.
+    const sum = (status: InvoiceStatus, currency?: string) =>
+      invoices.filter((i) => i.status === status && (!currency || i.currency === currency)).reduce((acc, i) => acc + Number(i.totalAmount), 0);
+    const currencies = [...new Set(invoices.map((i) => i.currency))];
+    const byCurrency = currencies.map((currency) => ({ currency, totalEarned: sum(InvoiceStatus.PAID, currency), pendingPayout: sum(InvoiceStatus.ISSUED, currency) }));
+    const single = currencies.length <= 1;
+    return {
+      totalEarned: single ? sum(InvoiceStatus.PAID) : null,
+      pendingPayout: single ? sum(InvoiceStatus.ISSUED) : null,
+      byCurrency,
+      invoices,
+    };
   }
 
   async markPaid(user: AuthUser, id: string, paymentReference: string) {
@@ -63,6 +74,9 @@ export class InvoicesService {
       where: { id: invoice.timesheetId ?? '', status: 'APPROVED' },
       data: { status: 'SETTLED' },
     });
+    await this.notifications.notifyWorker(invoice.reliefWorkerId, {
+      type: 'INVOICE_PAID', title: 'Invoice paid', body: `${invoice.invoiceNumber} · ref ${paymentReference}`, link: '/finance',
+    });
     return this.prisma.invoice.findUnique({ where: { id } });
   }
 
@@ -80,6 +94,44 @@ export class InvoicesService {
       i.issuedAt.toISOString().slice(0, 10),
       i.dueAt ? i.dueAt.toISOString().slice(0, 10) : '',
     ]);
+    return [header, ...rows].map((r) => r.map(csvCell).join(',')).join('\r\n') + '\r\n';
+  }
+
+  /**
+   * Purchase-invoice import file for accounting software (column names follow the common
+   * "bills" import layout used by Xero-style tools). One line per invoice: hours x agreed rate.
+   */
+  async exportAccounting(
+    user: AuthUser,
+    organizationId: string,
+    opts: { status?: InvoiceStatus; from?: string; to?: string; accountCode?: string; taxType?: string },
+  ) {
+    const invoices = (await this.findByOrganization(user, organizationId, opts.status)).filter((i) => {
+      const t = i.issuedAt.getTime();
+      return (!opts.from || t >= new Date(opts.from).getTime()) && (!opts.to || t <= new Date(opts.to).getTime() + 86_399_999);
+    });
+    const org = await this.prisma.organization.findUniqueOrThrow({ where: { id: organizationId }, select: { country: true } });
+    const market = marketFor(org.country);
+    const header = ['*ContactName', '*InvoiceNumber', 'Reference', '*InvoiceDate', '*DueDate', 'Description', '*Quantity', '*UnitAmount', '*AccountCode', '*TaxType', 'Currency'];
+    const rows = invoices.map((i) => {
+      const ts = i.timesheet;
+      const hours = ts ? Number(ts.billableHours) : 1;
+      const rate = ts ? Number(ts.hourlyRateApplied) : Number(i.totalAmount);
+      const day = (d?: Date | null) => (d ? d.toISOString().slice(0, 10) : '');
+      return [
+        `${i.reliefWorker.firstName} ${i.reliefWorker.lastName}`,
+        i.invoiceNumber,
+        i.paymentReference ?? '',
+        day(i.issuedAt),
+        day(i.dueAt),
+        `Relief cover${ts?.branch?.name ? ` at ${ts.branch.name}` : ''}`,
+        hours.toFixed(2),
+        rate.toFixed(2),
+        opts.accountCode ?? '310',
+        opts.taxType ?? market.accountingTaxType,
+        i.currency,
+      ];
+    });
     return [header, ...rows].map((r) => r.map(csvCell).join(',')).join('\r\n') + '\r\n';
   }
 }

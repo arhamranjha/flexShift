@@ -1,0 +1,37 @@
+{
+	local_certs
+	skip_install_trust
+}
+
+(security) {
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options nosniff
+		X-Frame-Options DENY
+		Referrer-Policy strict-origin-when-cross-origin
+		Permissions-Policy "camera=(), microphone=(), geolocation=()"
+		-Server
+	}
+}
+
+{$APP_HOST} {
+	import security
+	encode zstd gzip
+	reverse_proxy web-admin:3000
+}
+
+{$WORKER_HOST} {
+	import security
+	encode zstd gzip
+	reverse_proxy worker-portal:3001
+}
+
+{$API_HOST} {
+	import security
+	encode zstd gzip
+	# Uploaded documents are capped at 10 MB by the API; leave headroom for the multipart envelope.
+	request_body {
+		max_size 12MB
+	}
+	reverse_proxy api:4000
+}

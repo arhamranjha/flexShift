@@ -1,0 +1,52 @@
+image: node:22
+
+stages: [check, build]
+
+variables:
+  POSTGRES_PASSWORD: postgres
+  # The e2e suite rebuilds this database from migrations + seed on every run.
+  TEST_DATABASE_URL: postgresql://postgres:postgres@postgres:5432/flexshift_test?schema=public
+
+.pnpm: &pnpm
+  before_script:
+    - corepack enable
+    - pnpm install --frozen-lockfile
+
+backend:
+  stage: check
+  services:
+    - postgres:16-alpine
+  <<: *pnpm
+  script:
+    - cd apps/backend-api
+    - pnpm exec prisma generate
+    - pnpm lint
+    - pnpm test
+    - pnpm build
+
+lint:
+  stage: check
+  <<: *pnpm
+  script:
+    - pnpm exec eslint .
+
+packages:
+  stage: check
+  <<: *pnpm
+  script:
+    - pnpm --filter @flexshift/api-client lint
+    - pnpm --filter @flexshift/ui lint
+
+web-admin:
+  stage: build
+  <<: *pnpm
+  script:
+    - pnpm --filter web-admin lint
+    - pnpm --filter web-admin build
+
+worker-portal:
+  stage: build
+  <<: *pnpm
+  script:
+    - pnpm --filter worker-portal lint
+    - pnpm --filter worker-portal build
