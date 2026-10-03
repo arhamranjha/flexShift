@@ -9,7 +9,10 @@ import { mkdirSync } from 'node:fs';
 const ADMIN = process.env.ADMIN_URL || 'http://localhost:3000';
 const PORTAL = process.env.PORTAL_URL || 'http://localhost:3001';
 const SHOTS = process.env.SHOTS || '/tmp/fs-ui';
-const CHROME = process.env.CHROME || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
+const API = process.env.API_URL || 'http://localhost:4000';
+const CHROME = process.env.CHROME || (process.platform === 'win32'
+  ? 'C:/Program Files/Google/Chrome/Application/chrome.exe'
+  : '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome');
 const PW = 'FlexShiftPass2026!';
 mkdirSync(SHOTS, { recursive: true });
 
@@ -262,6 +265,73 @@ console.log('Negotiation round trip (worker portal <-> dashboard)');
   });
   await worker.context().close();
   await manager.context().close();
+}
+
+// ---------------------------------------------------------------- worker-initiated document sharing
+console.log('Document sharing (new worker <-> organization admin)');
+{
+  const stamp = Date.now();
+  const email = `share${stamp}@walkthrough.test`;
+  const res = await fetch(API + '/auth/register/relief-worker', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, password: 'WorkerPass123!', firstName: 'Walk', lastName: 'Through', phone: '+64 21 555 0500', registrationNumber: `WLK-${stamp % 1e7}` }),
+  });
+  if (!res.ok) problems.push(`could not register the sharing worker: ${res.status}`);
+  const worker = await newPage('share-worker', { width: 390, height: 844 });
+  const admin = await newPage('share-admin', { width: 1440, height: 900 });
+  await worker.goto(PORTAL + '/login');
+  await worker.getByLabel('Email').fill(email);
+  await worker.getByLabel('Password').fill('WorkerPass123!');
+  await worker.getByRole('button', { name: /Sign in/ }).click();
+  await worker.waitForURL('**/feed', { timeout: 10000 });
+  await admin.goto(ADMIN + '/login');
+  await admin.getByLabel('Email').fill('admin@apexhealth.co.uk');
+  await admin.getByLabel('Password').fill(PW);
+  await admin.getByRole('button', { name: 'Sign in' }).click();
+  await admin.waitForURL(ADMIN + '/', { timeout: 10000 });
+
+  await step('an unverified worker is offered "ask this organization" on a shift page', async () => {
+    await settle(worker);
+    await worker.locator('a[href^="/shifts/"]').first().click();
+    await worker.waitForURL('**/shifts/**', { timeout: 8000 });
+    await worker.getByText('Not verified yet?').waitFor({ timeout: 8000 });
+    await worker.getByRole('button', { name: /review me/ }).waitFor({ timeout: 6000 });
+    await shot(worker, 'share-1-worker-shift-ask');
+  });
+  await step('the org admin can see the organization code to hand out', async () => {
+    await admin.goto(ADMIN + '/settings');
+    await settle(admin);
+    await admin.getByText('APEX-UK').first().waitFor({ timeout: 8000 });
+  });
+  await step('worker asks by organization code from the profile', async () => {
+    await worker.goto(PORTAL + '/profile');
+    await settle(worker);
+    await worker.getByLabel('Organization code').fill('apex-uk');
+    await worker.getByRole('button', { name: 'Ask' }).click();
+    await worker.getByText('Request sent').first().waitFor({ timeout: 6000 });
+    await worker.getByText('Waiting for review').first().waitFor({ timeout: 6000 });
+    await shot(worker, 'share-2-worker-asked');
+  });
+  await step('the org admin sees the request and adds the worker to the staff bank', async () => {
+    await admin.goto(ADMIN + '/compliance');
+    await settle(admin);
+    const row = admin.getByRole('row').filter({ hasText: 'Walk Through' });
+    await row.waitFor({ timeout: 8000 });
+    await shot(admin, 'share-3-admin-requests');
+    await row.getByRole('button', { name: 'Add to staff bank' }).click();
+    await admin.getByRole('dialog').getByRole('button', { name: 'Add to staff bank' }).click();
+    await admin.getByText(/added to the staff bank/).first().waitFor({ timeout: 6000 });
+  });
+  await step('the worker sees they are in the staff bank and was notified', async () => {
+    await worker.reload();
+    await settle(worker);
+    await worker.getByText('In their staff bank').first().waitFor({ timeout: 8000 });
+    await worker.getByRole('button', { name: /Notifications/ }).click();
+    await worker.getByText(/added you to their staff bank/).first().waitFor({ timeout: 6000 });
+    await shot(worker, 'share-4-worker-accepted');
+  });
+  await worker.context().close();
+  await admin.context().close();
 }
 
 await browser.close();

@@ -74,7 +74,7 @@ export function Badge({ tone = 'slate', children, className }: { tone?: Tone; ch
 
 const STATUS_TONE: Record<string, Tone> = {
   OPEN: 'amber', DRAFT: 'slate', IN_NEGOTIATION: 'violet', BOOKED: 'emerald', IN_PROGRESS: 'sky', COMPLETED: 'emerald', CANCELLED: 'slate',
-  PENDING: 'amber', COUNTERED: 'violet', ACCEPTED: 'emerald', REJECTED: 'rose', APPLIED: 'amber', UNDER_REVIEW: 'sky', WITHDRAWN: 'slate',
+  PENDING: 'amber', COUNTERED: 'violet', ACCEPTED: 'emerald', REJECTED: 'rose', DECLINED: 'rose', APPLIED: 'amber', UNDER_REVIEW: 'sky', WITHDRAWN: 'slate',
   VERIFIED: 'emerald', EXPIRED: 'rose', SUBMITTED: 'amber', APPROVED: 'emerald', DISPUTED: 'rose', SETTLED: 'emerald', PENDING_SUBMISSION: 'slate',
   ISSUED: 'amber', PAID: 'emerald', APPROVED_LEAVE: 'emerald',
 };

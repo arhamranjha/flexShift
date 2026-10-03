@@ -128,6 +128,11 @@ function SettingsView() {
           <div className="p-5">
             {org.loading ? <LoadingBlock /> : org.error ? <ErrorBlock error={org.error} retry={org.reload} /> : (
               <div className="grid gap-4 max-w-xl">
+                <div className="text-sm">
+                  <span className="block text-xs font-semibold text-slate-700 mb-1">Organization code</span>
+                  <code className="rounded bg-slate-100 px-2 py-1 font-bold tracking-wide">{org.data?.code}</code>
+                  <span className="block text-[11px] text-slate-500 mt-1">Give this to relief workers: they enter it in the worker app to ask you to review their documents.</span>
+                </div>
                 <Field label="Name"><Input value={orgForm.name} onChange={(e) => setOrgForm({ ...orgForm, name: e.target.value })} /></Field>
                 <Field label="Billing email"><Input type="email" value={orgForm.billingEmail} onChange={(e) => setOrgForm({ ...orgForm, billingEmail: e.target.value })} /></Field>
                 <Field label="Phone"><Input value={orgForm.phone} onChange={(e) => setOrgForm({ ...orgForm, phone: e.target.value })} /></Field>

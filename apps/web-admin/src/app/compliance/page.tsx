@@ -9,6 +9,7 @@ import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { ExpiryCell, MandatoryChecklist, expiryState, fmtLong } from '@/components/DocHelpers';
 import { Header } from '@/components/Header';
+import { ReviewRequests } from '@/components/ReviewRequests';
 import { api, useAuth } from '@/lib/auth';
 import { useMarket } from '@/lib/market';
 
@@ -124,6 +125,7 @@ export default function CompliancePage() {
             Verifying here makes them bookable wherever the rules are met, and they are notified.
           </p>
         )}
+        <ReviewRequests onAnswered={reload} />
         <div className="flex flex-wrap items-center gap-3">
           <div className="flex gap-1 p-1 bg-slate-100 rounded-lg w-fit text-sm font-semibold">
           {TABS.map((t) => (
