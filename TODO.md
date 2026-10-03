@@ -15,7 +15,7 @@ Legend: [x] done · [~] partly done · [ ] not started
 - [x] In-app notifications; analytics overview; market-rate benchmark (min 5 shifts / 3 orgs)
 - [x] Migrations committed; seed is idempotent and date-relative
 - [x] 59 jest e2e tests incl. a contract test of the shared API client; CI config
-- [ ] S3 storage adapter (interface exists; local disk only)
+- [x] S3 document storage (set S3_BUCKET; tested against an S3-compatible server; local disk remains the default)
 - [x] Email delivery for important notifications (SMTP via nodemailer, off by default; per-user opt-out in the bell menu; drivers off/smtp/json)
 - [ ] Real BACS file: needs worker bank details (CSV payment batch exists, no sort code/account no.)
 - [ ] Accounting-software export

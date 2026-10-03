@@ -50,7 +50,7 @@ One Nest module per domain (auth, users, organizations, branches, relief-workers
 - **Guard rules:** `JwtAuthGuard` also blocks every endpoint except `/auth/me|logout|change-password` while `mustChangePassword` is set (temporary passwords from concierge onboarding and `POST /users`). Logout/password change bump `User.tokenVersion`, which revokes older tokens. Throttling via `@nestjs/throttler`.
 - Shift lifecycle: OPEN → IN_NEGOTIATION → BOOKED → IN_PROGRESS → COMPLETED (COMPLETED only through timesheet approval, which also issues the invoice). Booked shifts only allow title/notes edits. Timesheets are bounded to the shift window.
 - Relief-worker endpoints for the signed-in worker live under `/relief-workers/me/...`; there is no worker id in those URLs on purpose.
-- Documents are stored by `StorageService` (local disk under `UPLOAD_DIR`; swap the methods for S3) and served only through `GET /relief-workers/documents/:id/file`.
+- Documents are stored by `StorageService` (local disk under `UPLOAD_DIR`, or S3 when `S3_BUCKET` is set) and served only through `GET /relief-workers/documents/:id/file`. `test/storage-s3.e2e-spec.ts` runs only with `S3_TEST_ENDPOINT` (e.g. `docker run -p 9090:9090 -e COM_ADOBE_TESTING_S3MOCK_STORE_INITIAL_BUCKETS=flexshift-test adobe/s3mock`).
 
 ## Frontend architecture
 
