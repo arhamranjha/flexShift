@@ -2,7 +2,7 @@ import { GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import { promises as fs } from 'fs';
-import { extname, join, resolve } from 'path';
+import { extname, join, resolve, sep } from 'path';
 
 export interface StoredFile {
   key: string;
@@ -59,7 +59,7 @@ export class StorageService {
       }
     }
     const path = resolve(this.root, key);
-    if (!path.startsWith(this.root + '/') && path !== this.root) throw new NotFoundException('File not found');
+    if (!path.startsWith(this.root + sep) && path !== this.root) throw new NotFoundException('File not found');
     try {
       return await fs.readFile(path);
     } catch {

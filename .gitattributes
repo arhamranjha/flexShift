@@ -1,0 +1,6 @@
+# Keep LF in every checkout, whatever the machine's core.autocrlf says. deploy/push.sh rsyncs the working tree to a
+# Linux server, so CRLF from a Windows checkout would break the shell scripts, Dockerfiles and Caddyfile there.
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.ico binary
